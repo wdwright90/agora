@@ -4,8 +4,8 @@ Substantial tasks use stable directories named `AGORA-NNN-short-name`. Allocate 
 
 ## Active work
 
-No active task records yet.
+No active task records.
 
 ## Completed work
 
-No completed task records yet. The initial documentation scaffold is recorded in the repository's first commit.
+- [AGORA-001 — Rust package design](AGORA-001-rust-package-design/brief.md): discovery and draft package proposal delivered for review; implementation and acceptance remain separate.

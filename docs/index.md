@@ -11,6 +11,7 @@ Components are logical boundaries and can span multiple Rust crates or Python pa
 
 ## Project workflow
 
+- [Rust workspace](../rust/README.md)
 - [Contributing](../CONTRIBUTING.md)
 - [AI development workflow](workflows/ai-development.md)
 - [Active work](../work/index.md)
@@ -25,4 +26,4 @@ Design documents use `draft`, `accepted`, or `superseded`. Track implementation 
 
 Document IDs are stable and unique within each prefix: `SADD`, `CDD`, `SPEC`, and `ADR`. Use descriptive filenames; allocate the next unused ID when creating a document. Templates do not allocate IDs.
 
-The SADD is currently a draft outline. No component design, detailed spec, or product roadmap has been accepted yet.
+The SADD currently captures the project purpose and high-level requirements in draft form; detailed architecture remains to be defined. No component design, detailed spec, or product roadmap has been accepted yet.

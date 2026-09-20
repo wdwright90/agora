@@ -3,6 +3,7 @@
 
 # Rust build output
 /target/
+/rust/target/
 
 # Python environments and caches
 .venv/
