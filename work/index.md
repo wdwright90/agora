@@ -4,7 +4,7 @@ Substantial tasks use stable directories named `AGORA-NNN-short-name`. Allocate 
 
 ## Active work
 
-No active task records.
+- [AGORA-002 — Simulation CDD](AGORA-002-simulation-cdd/brief.md): step lifecycle and component design in progress.
 
 ## Completed work
 

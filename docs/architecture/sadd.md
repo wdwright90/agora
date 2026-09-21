@@ -42,7 +42,7 @@ The milestone is usable when:
 
 This milestone establishes the client-to-simulation action and observation loop. Model training, richer observations, environment generation and storage tooling, environment objects and machines, recording and playback, interactive state editing, and parallel environments are outside its acceptance scope. They remain part of the broader project scope described above.
 
-Grid dimensions, spawn placement, allowed movement directions and distance measurement, boundary behavior, connection and message details, and the minimal visualization controls remain to be specified before implementation.
+The MVP uses one action per step: a cardinal move with distance 0 or 1 and a movement budget of 1. Distance 0 stays still. Environments own boundary behavior; the MVP supports bounded edges, where outward moves fail during execution. Spawning supports explicit or random unoccupied cells. The draft [simulation CDD](../components/simulation/cdd.md) records execution, membership, and perception decisions. Grid dimensions, concrete messages, and implementation interfaces remain to be specified.
 
 ### Core concepts
 
@@ -71,7 +71,7 @@ Development will initially run the simulation and clients on the same computer, 
 
 ### Run lifecycle
 
-A simulation run should normally close automatically when it is no longer being used for training or visualization. Completion must preserve its recording for later examination once recording is supported. The definition of inactivity, handling of disconnected clients, and cleanup timing remain to be specified. This requirement concerns an individual run; the lifetime of the hosting application remains to be defined.
+A simulation run should normally close automatically when it is no longer being used for training or visualization. Completion must preserve its recording for later examination once recording is supported. Inactivity and disconnected-client handling follow the server coordination and recovery rules below; timeout durations remain to be specified. This requirement concerns an individual run; the lifetime of the hosting application remains to be defined.
 
 Connection mechanisms, run creation and joining rules, and control permissions remain to be defined. A client's request for a random environment may mean choosing a stored environment or generating a new one; this distinction remains open.
 
@@ -131,7 +131,7 @@ By default, each simulation step waits for every participating agent to submit i
 
 Client hardware performance and connection quality may affect how long a step takes in real time, but must not determine an agent's action rate within the simulation. The design must leave room for a future capability in which intentionally faster agents can take more actions than slower agents according to explicit simulation rules. Those rules, including how action rate relates to agent properties such as movement speed, remain to be defined.
 
-A disconnected or stalled client could block all other agents under the default waiting behavior. An explicit recovery policy is needed; evicting the blocking agent is a candidate mechanism. Failure detection, waiting limits, eviction behavior, and reconnection handling remain open design questions. No automatic eviction or timeout policy is specified yet.
+A disconnected or stalled client enters reversible fallback control: the server supplies zero-distance actions and suppresses expensive observation generation, leaving its body in the world. Explicit removal is a separate operation. Failure detection and timeout values remain open; recovery follows the rules below.
 
 Message formats, transport, detailed timing and recovery policies, and component interactions remain to be defined.
 
@@ -139,7 +139,18 @@ Message formats, transport, detailed timing and recovery policies, and component
 
 Each simulation can instantiate its own policy for resolving conflicting agent actions. Initially, the framework will supply only an ordering-based policy: after all agents have submitted their actions for a step, actions are processed in the simulation's execution order. When actions conflict, the first action succeeds and the later conflicting action fails. For example, if two agents try to collect the same food token, the first agent in execution order collects it and the second agent's collection action fails.
 
-Under the initial policy, the framework randomly shuffles agent execution order for each simulation step. Execution order is independent of client message arrival order, so connection quality and hardware performance do not determine conflict priority. How action failures are reported to clients and how multiple actions from one agent are ordered remain to be defined.
+Under the initial policy, the framework randomly shuffles agent execution order for each simulation step. Execution order is independent of client message arrival order, so connection quality and hardware performance do not determine conflict priority. Execution failures are inferred from observations, without a separate result. The MVP permits one action per agent per step; multiple and composable actions are deferred.
+
+### Server coordination and recovery
+
+These decisions refine the earlier open lifecycle questions. The server owns connections, authority, clocks, pacing, and cleanup; the simulation owns participation, execution, and perception.
+
+- Invalid submissions return interface errors, do not satisfy participation requirements, and do not reset deadlines. Execution failures produce no separate result: agents infer consequences from end-of-step observations. The MVP's observations remain empty.
+- Submission deadlines count only time when pacing permits advancement and submissions are missing. Intentional pacing delays are excluded; pause suspends the response window. Connection-health checks operate independently of pacing.
+- Reconnection identifies the existing agent and proves control using an opaque control token issued at creation. It revokes the old connection even if it appears healthy. During collection, discard the old pending action and allow replacement without resetting the deadline. During execution, finish the step before handover. Restore observation generation while preserving physical state and impairments. Contract details and token lifecycle remain open.
+- A separate server-maintained pacing gate permits a ready step to execute. Controls are pause, single-step, a selected maximum rate, and unlimited advancement. An executing step finishes before pausing. Client readiness may reduce the achieved rate.
+- One observer holds pacing control at a time; others may view. If the controller disconnects while observers remain, preserve pacing and allow another to claim control. When the last observer leaves, use unlimited pacing if client-controlled agents remain.
+- With neither client-controlled agents nor observers, pause advancement and start a resource-release timeout. Regaining a controlled agent or observer cancels it. Expiry releases the run, preventing reconnection to its former agents. Timeout values, control-claim arbitration, and hosting-application lifetime remain open.
 
 ## Cross-cutting concerns
 
@@ -149,13 +160,13 @@ To be defined: reproducibility, performance, compatibility, error handling, obse
 
 ## Decisions and open questions
 
-- For the first usable milestone, what are the grid dimensions, spawn placement, allowed movement directions and distance measurement, boundary behavior, connection and message details, and minimal visualization controls?
+- For the first usable milestone, what are the grid dimensions, concrete message contracts, and visualization controls?
 - Which capabilities from the POC should be retained?
 - How will simulations define agent actions and observations, including interactions between multiple agents?
 - How will multiple actions from one agent be ordered within a step?
-- How will action failures be reported to clients, and how will simulations define their own conflict policies?
+- How will simulations define conflict policies beyond the initial randomized sequential policy?
 - How will future simulation-defined action rates allow faster agents to act more often independently of client hardware and connection quality?
-- How will stalled or disconnected clients be detected, and when should a blocking agent be evicted? What happens to its simulation state, the pending step, and any later reconnection?
+- What connection-health checks, timeout values, and control-token lifecycle implement fallback control and reconnection?
 - Which agent internal states, properties, and observation transformers will be supported initially?
 - What configuration format and programmatic interfaces will support environment creation, generation, organization, and storage, and what behavior will the initial environment components provide?
 - Does requesting a random environment mean selecting a stored environment, generating a new environment, or supporting both?
