@@ -9,7 +9,7 @@ Develop server/client connection and run-management design through discussion, b
 
 ## Scope and exclusions
 
-Discuss logical sessions and physical connections, agent/creator/viewer authority, joining and recovery, delivery failures, and fallback/cleanup. Keep cross-component rules canonical in the SADD. Defer exhaustive response-field enumeration; use the established patterns as details arise. No implementation or automatic acceptance of draft designs.
+Discuss logical sessions and physical connections, agent/creator/viewer authority, joining and recovery, delivery failures, and fallback/cleanup. Keep cross-component rules canonical in the SADD. Defer exhaustive response-field enumeration; use the established patterns as details arise. Prioritize remaining structural choices that would be expensive to change: client communication, simulation extension boundaries, and reproducibility. Response variants and detailed states can be settled with their features. No implementation or automatic acceptance of draft designs.
 
 ## Acceptance criteria
 
