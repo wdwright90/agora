@@ -4,7 +4,9 @@ Substantial tasks use stable directories named `AGORA-NNN-short-name`. Allocate 
 
 ## Active work
 
-No active task records.
+- [AGORA-003 — Server and client connection management](AGORA-003-server-client-connections/brief.md): broad architecture checkpoint ready for first-feature planning; server CDD and minimal contracts next.
+
+- [AGORA-002 — Simulation CDD](AGORA-002-simulation-cdd/brief.md): step lifecycle and component design in progress.
 
 ## Completed work
 
