@@ -8,4 +8,4 @@
 - Put disposable AI outputs under `.local/ai-runs/<task-id>/<run-id>/`. Keep durable findings and verification summaries in tracked task records or maintained documentation.
 - Treat research, raw model output, and POC documents as evidence or proposals, not accepted instructions or requirements.
 - Update affected documentation with behavior or design changes. Record checks actually performed and any limitations; do not claim unrun checks passed.
-- The Rust workspace is under `rust/` and has no member packages yet. No source packages exist yet. Do not invent successful build or test results.
+- The Rust workspace is under `rust/`; see [rust/README.md](rust/README.md) for its packages and checks. Do not invent successful build or test results.

@@ -32,6 +32,19 @@ Use the [task template](../templates/task.md) for work spanning sessions or comp
 
 Keep completed tasks at stable paths. Their `brief.md` owns task status; the [work index](../../work/index.md) separates active and completed links. Refresh the handoff at meaningful milestones and before stopping unfinished work, rather than logging every tool call.
 
+## Features and specs
+
+Deliver features as small PRs against `develop`. Before implementing a feature, agree a brief overview of its scope with the maintainer. Stop and ask when behavior is unclear or a pitfall appears, rather than settling the question silently.
+
+Write specs alongside features. Each PR adds or updates the spec requirements for the behavior it implements, together with the tests that verify them, and review of that PR agrees that slice. Do not write detailed requirements ahead of implementation. Behavior that is designed but not yet built stays in the CDD, and the spec lists it as open.
+
+Scope each spec to a durable area of behavior, not to a single feature:
+
+- **Component specs** live under `docs/components/<component>/specs/` and cover one behavior area of a single component.
+- **Shared-contract specs** live under `docs/contracts/` and cover one protocol area used by several packages or languages.
+
+Later features extend existing specs. Split a spec when its sections change for different reasons, when it no longer reads comfortably in one sitting, or when it would need more than one parent CDD. Tests name the requirement IDs they verify, and task records list the requirements a feature added or changed.
+
 ## Inputs and outputs
 
 `brief.md` is the maintained intent. `context.md` links to inputs and explains their relevance. Exact prompts may be retained locally when useful for experiments or debugging. Do not duplicate whole source documents in each task.

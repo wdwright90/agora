@@ -4,6 +4,4 @@ Use the [ADR template](../templates/adr.md) for consequential choices and tradeo
 
 ADRs explain why a choice was made. The SADD and CDDs describe the current accepted design and must be updated when a decision changes it. Supersede historical decisions with explicit replacement links rather than silently rewriting their original rationale.
 
-No architecture decisions have been accepted yet.
-
-- [ADR-001 — Rust package boundaries](0001-rust-package-boundaries.md) (draft).
+- [ADR-001 — Rust package boundaries](0001-rust-package-boundaries.md) (accepted).

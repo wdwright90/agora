@@ -153,11 +153,11 @@ The simulation framework is responsible for:
 
 Clients own model training, including weight updates. The Python project provides an example client and tooling for training different model architectures and understanding their behavior.
 
-### Proposed Rust package mapping
+### Rust package mapping
 
-The following is a proposal for maintainer review, not an accepted package split. No member packages exist yet. The rationale is recorded in [ADR-001](../decisions/0001-rust-package-boundaries.md). Each logical component will receive a [CDD](../components/README.md) as its design is developed.
+The maintainer accepted this package split in [ADR-001](../decisions/0001-rust-package-boundaries.md), which records the rationale. Packages are created as features need them; `agora-sim` exists, and the others are planned. Each logical component will receive a [CDD](../components/README.md) as its design is developed.
 
-| Planned package | Responsibility | First milestone |
+| Package | Responsibility | First milestone |
 | --- | --- | --- |
 | `agora-protocol` | Language-neutral API representations: run and agent identifiers, requests, actions, observations, capability descriptions, live view data, and errors. Rust types implement canonical shared contracts. No simulation execution or model inference. | Minimal connection, spawn, move, empty observation, and live view messages. |
 | `agora-sim` | Bevy simulation state and stepping, action validation, randomized conflict resolution, agent properties and senses, environment building components and generation. Produces agent observations and full state for viewing. No networking, process launching, or rendering. | Empty grid, spawning, bounded movement, exclusive cell occupancy, and step coordination. |
@@ -166,9 +166,9 @@ The following is a proposal for maintainer review, not an accepted package split
 | `agora-viewer` | Bevy visualization, live viewing and controls, playback UI, and later live editing and local client launching from profiles. | Render the live empty grid and both agents. |
 | `agora-recording` | Recording format, writing and reading recorded state, and inspection/playback data access. No model execution or simulation resumption. | Deferred until recording work begins. |
 
-Environment loading, generation, and built-in behaviors start as modules within `agora-sim`. Run management and environment storage orchestration start within `agora-server`. Agent profile launching starts within `agora-viewer`. These can become separate packages if their scope or reuse justifies it. The Python client remains a separate project implementing the same shared contracts; a Rust training package is not proposed.
+Environment loading, generation, and built-in behaviors start as modules within `agora-sim`. Run management and environment storage orchestration start within `agora-server`. Agent profile launching starts within `agora-viewer`. These can become separate packages if their scope or reuse justifies it. The Python client remains a separate project implementing the same shared contracts; a Rust training package is not planned.
 
-Proposed internal dependencies: `agora-sim` and `agora-client` depend on `agora-protocol`; `agora-server` depends on `agora-sim` and `agora-protocol`; `agora-viewer` depends on `agora-client` and `agora-protocol`. When added, `agora-recording` depends on `agora-protocol`, and the server and viewer depend on it. Neither the viewer nor the recording package depends on simulation execution. A future recording schema may differ from live messages; that persistence contract must be designed explicitly.
+Internal dependencies: `agora-sim` and `agora-client` depend on `agora-protocol`; `agora-server` depends on `agora-sim` and `agora-protocol`; `agora-viewer` depends on `agora-client` and `agora-protocol`. When added, `agora-recording` depends on `agora-protocol`, and the server and viewer depend on it. Neither the viewer nor the recording package depends on simulation execution. A future recording schema may differ from live messages; that persistence contract must be designed explicitly.
 
 The server owns live state changes, including changes requested through the viewer. The simulation owns per-run step coordination; the server supplies submissions from clients and handles connection lifecycle. Independent runs must not share an action barrier when parallel environments are added. View data is separate from agent observations, so the first milestone can render positions while returning empty observations to agents.
 
