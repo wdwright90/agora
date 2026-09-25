@@ -4,8 +4,9 @@
 use std::collections::BTreeSet;
 
 use agora_sim::{
-    AdvanceError, AgentId, ConfigError, Direction, GridPos, Move, Placement, SimConfig, Simulation,
-    SpawnError, StartError, StateId, Status, Submission, SubmitError, ViewState,
+    AdvanceError, AgentId, AgentLimitError, ConfigError, Direction, GridPos, Move, Placement,
+    SimConfig, Simulation, SpawnError, StartError, StateId, Status, Submission, SubmitError,
+    ViewState,
 };
 
 fn sim(width: u32, height: u32, seed: u64) -> Simulation {
@@ -241,10 +242,12 @@ fn r08_submission_errors_in_check_order() {
             action: too_far,
             ..valid
         }),
-        Err(SubmitError::DistanceExceedsBudget {
-            distance: 2,
-            budget: 1,
-        })
+        Err(SubmitError::AgentLimit(
+            AgentLimitError::DistanceBudgetExceeded {
+                distance: 2,
+                budget: 1,
+            }
+        ))
     );
 
     // None of the rejections filled the slot, so a valid submission is still accepted.

@@ -6,7 +6,9 @@ use bevy_ecs::prelude::*;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
-use crate::error::{AdvanceError, ConfigError, SpawnError, StartError, SubmitError};
+use crate::error::{
+    AdvanceError, AgentLimitError, ConfigError, SpawnError, StartError, SubmitError,
+};
 use crate::types::{
     AgentId, AgentView, GridPos, MOVEMENT_BUDGET, Move, Observation, Observations, Placement,
     Readiness, StateId, Status, Submission, ViewState,
@@ -37,11 +39,15 @@ struct Agent(AgentId);
 #[derive(Component)]
 struct Position(GridPos);
 
-/// Bounded grid with a row-major occupancy index.
+/// Bounded grid dimensions plus a cell-to-agent index.
 #[derive(Resource)]
 struct Grid {
     width: u32,
     height: u32,
+    /// Which agent, if any, occupies each cell, in row-major order (`y * width + x`).
+    /// Answers "is this cell free?" in constant time during spawns and moves, and lists
+    /// free cells in a fixed order for random spawning. It mirrors the agents' `Position`
+    /// components and is updated alongside them on every spawn and move.
     occupancy: Vec<Option<AgentId>>,
 }
 
@@ -222,10 +228,11 @@ impl Simulation {
             return Err(SubmitError::AlreadySubmitted(agent));
         }
         if action.distance > MOVEMENT_BUDGET {
-            return Err(SubmitError::DistanceExceedsBudget {
+            return Err(AgentLimitError::DistanceBudgetExceeded {
                 distance: action.distance,
                 budget: MOVEMENT_BUDGET,
-            });
+            }
+            .into());
         }
         self.world
             .resource_mut::<PendingActions>()

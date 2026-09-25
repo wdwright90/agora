@@ -64,9 +64,9 @@ Server responsibilities are out of scope: connections, authority, pacing, deadli
   2. The agent must exist (*unknown-agent*).
   3. The target must equal the current state (*wrong-target-state*, reporting the expected and supplied values).
   4. The agent must not already have an accepted action for this state (*already-submitted*).
-  5. The distance must be at most the movement budget of 1 (*distance-exceeds-budget*).
+  5. The action must be within the agent's limits. A distance above the movement budget of 1 is rejected with *distance-budget-exceeded*.
 
-  A rejected submission does not fill the agent's action slot.
+  Checks 1–4 are *submission errors*: the submission is malformed or doesn't fit the run's current state. Check 5 is an *agent-limit error*: a well-formed action that exceeds what this agent can do. The two categories are kept distinct so that limit checks can grow with agent properties. A rejected submission does not fill the agent's action slot.
 - **SPEC-001-R09:** The first accepted submission for an agent in a state is fixed. Later submissions for that agent and state are rejected, and the accepted action is kept.
 
 ### Readiness

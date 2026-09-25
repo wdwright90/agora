@@ -43,8 +43,17 @@ pub enum SubmitError {
     },
     #[error("{0} already has an accepted action for this state")]
     AlreadySubmitted(AgentId),
+    /// The submission is well formed, but the action exceeds the agent's limits.
+    #[error(transparent)]
+    AgentLimit(#[from] AgentLimitError),
+}
+
+/// A well-formed action whose parameters exceed what the agent can do, such as its
+/// movement budget. Kept separate from submission errors (wrong phase, agent, or state).
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum AgentLimitError {
     #[error("move distance {distance} exceeds the movement budget of {budget}")]
-    DistanceExceedsBudget { distance: u32, budget: u32 },
+    DistanceBudgetExceeded { distance: u32, budget: u32 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
