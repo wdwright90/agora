@@ -1,6 +1,6 @@
 ---
 id: ADR-001
-status: draft
+status: accepted
 owner: maintainer
 date: 2026-09-19
 ---
@@ -19,7 +19,7 @@ The [SADD](../architecture/sadd.md) requires shared runs across clients, optiona
 
 ## Decision
 
-Propose the third option with the [package responsibilities and dependency direction in the SADD](../architecture/sadd.md#proposed-rust-package-mapping). Start with protocol, simulation, server, client, and viewer packages; introduce recording when that feature begins.
+Adopt the third option with the [package responsibilities and dependency direction in the SADD](../architecture/sadd.md#rust-package-mapping). Start with protocol, simulation, server, client, and viewer packages; introduce recording when that feature begins.
 
 Keep the simulation authoritative and independent of rendering and network transport. The viewer uses live state supplied by the server or recorded state, rather than executing the simulation itself. Launched agents remain ordinary clients with their own inference runtime, following the maintainer's agreed starting approach.
 
@@ -33,4 +33,4 @@ The first milestone needs a minimal live viewing path rather than the POC's reco
 
 ## Acceptance and supersession
 
-Package boundaries are proposed and awaiting maintainer review. The user has agreed to reusable profiles and local client launching as the starting direction, Rust-based extensions, and inspection-only playback; those requirements do not constitute acceptance of this package mapping.
+The maintainer accepted this package mapping on 2026-09-24, before the first package (`agora-sim`) was created. No foreseeable problems exist under the current design; boundaries can be revised by a later ADR if implementation shows the need. The earlier agreements on reusable profiles and local client launching, Rust-based extensions, and inspection-only playback remain separate requirements.
