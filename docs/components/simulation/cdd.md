@@ -16,7 +16,7 @@ This draft records lifecycle decisions discussed with the maintainer. Implemente
 
 ## Package mapping
 
-The `agora-sim` package (`rust/agora-sim`) implements this component using the Bevy ECS (`bevy_ecs`), without rendering or networking. Its planned dependency on `agora-protocol` follows the [package mapping](../../architecture/sadd.md#rust-package-mapping); message representations remain to be specified in canonical shared contracts.
+The `agora-sim` package (`rust/agora-sim`) implements this component using the Bevy ECS (`bevy_ecs`), without rendering or networking. For the MVP it does not depend on `agora-protocol`. It keeps its own types, and the server maps them to the [client protocol](../../contracts/client-protocol.md) (see the [package mapping](../../architecture/sadd.md#rust-package-mapping)).
 
 ## Internal structure
 

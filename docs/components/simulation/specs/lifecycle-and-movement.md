@@ -128,4 +128,4 @@ Tests are in `rust/agora-sim/tests/lifecycle_and_movement.rs`. Each test name st
 ## Open questions
 
 - Post-Start membership, removal, suppression, reconnection reset, and batch submission. See the CDD's open questions.
-- Whether the simulation should share identifier types with `agora-protocol` once that package exists.
+- Sharing types with `agora-protocol` is deferred. For the MVP the simulation keeps its own types, and the server maps them.
