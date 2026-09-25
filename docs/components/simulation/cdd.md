@@ -12,11 +12,11 @@ packages: [agora-sim]
 
 The simulation owns a run's world state, participating agents, action collection and validation, sequential execution, environment effects, and perception generation. It follows the [SADD](../../architecture/sadd.md). Networking, connection authority, elapsed-time deadlines, pacing, and run cleanup belong to the server; rendering belongs to the viewer.
 
-This draft records lifecycle decisions discussed with the maintainer. It does not accept the complete package proposal or authorize implementation. Rich capabilities and perception remain future design work beyond the empty-observation MVP.
+This draft records lifecycle decisions discussed with the maintainer. Implemented behavior is specified in [SPEC-001](specs/lifecycle-and-movement.md). Rich capabilities and perception remain future design work beyond the empty-observation MVP.
 
 ## Package mapping
 
-The proposed `agora-sim` package implements this component using Bevy, without rendering or networking. No package exists yet. The proposed dependency on `agora-protocol` follows the [package mapping](../../architecture/sadd.md#proposed-rust-package-mapping); message representations remain to be specified in canonical shared contracts.
+The `agora-sim` package (`rust/agora-sim`) implements this component using the Bevy ECS (`bevy_ecs`), without rendering or networking. Its planned dependency on `agora-protocol` follows the [package mapping](../../architecture/sadd.md#rust-package-mapping); message representations remain to be specified in canonical shared contracts.
 
 ## Internal structure
 
@@ -147,7 +147,9 @@ External live edits are required eventually, but their admission and scheduling 
 
 ## Detailed specifications
 
-No detailed simulation specs or message contracts have been written. Future specs should link canonical [shared contracts](../../contracts/README.md), rather than duplicate them.
+- [SPEC-001 — Simulation lifecycle and movement](specs/lifecycle-and-movement.md) (draft): grid creation, setup spawning, Start, submission, readiness, advancement with MVP moves, and viewer state.
+
+Specs should link canonical [shared contracts](../../contracts/README.md) rather than duplicate them. No message contracts have been written yet.
 
 ## Open questions
 
