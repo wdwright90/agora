@@ -1,10 +1,12 @@
 # Handoff
 
-Checkpoint: 2026-09-24, PR 2 (client protocol, part 1), branch `feature/protocol-setup`. PR 1 (`agora-sim` core) was merged as #3.
+Checkpoint: 2026-09-25, PR 3 (`agora-server`, part 1), open as #5 on branch `feature/server-setup`. PR 1 (`agora-sim` core) merged as #3, and PR 2 (client protocol) merged as #4.
 
 ## Resume here
 
-When PR 2 has been reviewed and merged, agree the scope of PR 3 (`agora-server`, part 1: WebSocket host, handshake, create/join, spawn, and Start) with the maintainer before implementing it.
+The maintainer is reviewing PR #5. First, check its review comments with `gh pr view 5 --comments` and the inline comments through the GitHub API. Answer questions, and agree any changes before making them on `feature/server-setup`.
+
+Once #5 has merged, agree the scope of PR 4 (`agora-server`, part 2: step submission and advancement, observation routing, viewer snapshots, and basic pacing) with the maintainer before implementing it.
 
 ## Decisions
 
@@ -20,23 +22,32 @@ When PR 2 has been reviewed and merged, agree the scope of PR 3 (`agora-server`,
   - Start returns a `started` confirmation.
   - `agora-sim` does not depend on `agora-protocol` for the MVP; the server maps between them. The ADR-001 revision records this.
   - Error codes are stable snake_case strings. Agent-limit codes will use an `agent_limit.` prefix when the step messages are added in PR 4.
+  - From review: the shared fixtures stay under `docs/contracts/fixtures/`, and `hello` stays a separate handshake.
+- **PR 3** (agreed 2026-09-25):
+  - Stack: tokio, `tokio-tungstenite`, `tracing`, and `clap`. Each run is a task that owns its `Simulation`; connections send it commands.
+  - Start is rejected with `start_not_eligible` when there are no agents and no viewers. Viewers don't exist yet, so Start needs an agent.
+  - Lifetimes: a disconnected session expires after the session timeout (default 2 minutes). A run with no sessions is released after the run timeout (default 5 minutes), and a join cancels that. The SADD's release rule was updated from "no controlled agents or observers" to "no sessions".
+  - Each session keeps its 5 most recent results for retries (SPEC-002-R07).
+  - The SADD's session recovery window default changes from 5 minutes to 2 minutes, to match.
+  - Deferred: removing an expired session's agents (needs removal in the sim), and closing a setup run whose creator expires (needs a closure message).
+  - The `/agora-resume` Claude Code skill wrapper is included in this PR.
 
-## PR 2 contents
+## PR 3 contents
 
-- [SPEC-002](../../docs/contracts/client-protocol.md) (draft), with fixtures in `docs/contracts/fixtures/client-protocol/`.
-- `rust/agora-protocol`: serde types, plus tests named by requirement ID.
-- Choices for review:
-  - A second `hello` returns `malformed_message`.
-  - `unsupported_protocol_version` lists the supported versions as an array.
-  - The bundled catalog entry ID appears in the fixtures as `empty-grid-10x10`, but the entry itself is defined in PR 3.
+- `rust/agora-server`: library and executable ([CDD-002](../../docs/components/server/cdd.md), [SPEC-003](../../docs/components/server/specs/sessions-and-runs.md)).
+- SPEC-002: the retention rule in R07, and server-side verification rows.
+- `agora-protocol`: `ClientMessage::TYPES`, and a clearer `Hello` doc comment.
+- SADD: the run release rule, the 2-minute recovery window default, the MVP result retention, and the package status.
+- `.claude/skills/agora-resume/SKILL.md`, which defers to `.agents/skills/agora-resume/SKILL.md`.
 
 ## Verification
 
 In `rust/`:
 
-- `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo doc --no-deps` with `-D warnings`: all passed.
-- `cargo test --workspace`: 40 passed (30 in agora-sim, 10 in agora-protocol).
-- Each invalid fixture was confirmed to fail for its intended reason.
+- `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo doc --no-deps --workspace` with `-D warnings`: all passed.
+- `cargo test --workspace`: 75 passed (30 in agora-sim, 10 in agora-protocol, and 35 in agora-server: 2 unit, 23 SPEC-002, and 10 SPEC-003).
+- The SPEC-003 timer tests passed in 8 consecutive runs.
+- `agora-server --help` and startup were checked by hand.
 
 No CI exists.
 
@@ -44,3 +55,6 @@ No CI exists.
 
 - Retrying a lost `create_run` or `join_run` response is unresolved until session recovery.
 - PR 4 adds step, observation, viewer, and pacing messages. Observation batches will be lists, because JSON object keys must be strings.
+- SPEC-003-R03 agent ownership is recorded but not yet observable. Test it in PR 4, when observations are routed by owner.
+- PR 4 will need agent removal in `agora-sim` before expired sessions' agents can be cleaned up.
+- The request log moves from the connection into shared session state when session recovery is built.

@@ -66,10 +66,7 @@ fn set(items: &[&str]) -> BTreeSet<String> {
 #[test]
 fn r01_r08_valid_client_fixtures_round_trip_and_cover_every_type() {
     let covered = round_trip_valid::<ClientMessage>("client");
-    assert_eq!(
-        covered,
-        set(&["hello", "create_run", "join_run", "spawn", "start"])
-    );
+    assert_eq!(covered, set(ClientMessage::TYPES));
 }
 
 #[test]

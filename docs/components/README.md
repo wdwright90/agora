@@ -14,3 +14,4 @@ A component may span multiple packages or languages. Its CDD describes responsib
 Use the [CDD template](../templates/cdd.md) and [spec template](../templates/spec.md). Create specs only for concrete requirements. Shared contracts belong in [contracts](../contracts/README.md) and are referenced by every participating CDD.
 
 - [Simulation — CDD-001](simulation/cdd.md) (draft): step lifecycle, world state, actions, and perception boundaries; package `agora-sim`; specs: [SPEC-001](simulation/specs/lifecycle-and-movement.md) (draft).
+- [Server — CDD-002](server/cdd.md) (draft): connections, sessions, run hosting, and lifetimes; package `agora-server`; specs: [SPEC-003](server/specs/sessions-and-runs.md) (draft).

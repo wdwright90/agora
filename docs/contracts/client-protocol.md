@@ -70,6 +70,12 @@ Step submission, observations, viewer snapshots, pacing, session recovery, and c
   - A retry after its stored result expires returns `result_expired`.
 
   The `create_run` or `join_run` request that establishes a session supplies that session's first request number.
+
+  *(MVP.)* The server keeps the results of each session's 5 most recent admitted requests, including error results. When an ID is at or below the highest admitted number and has no retained result:
+  - if it is older than every retained result, the server returns `result_expired`, whether the number was used or skipped;
+  - otherwise the number was skipped, and the server returns `stale_request_id`.
+
+  Requests rejected by these ID checks are not admitted or recorded. The SADD's time-based retention window replaces this rule once session recovery is built.
 - **SPEC-002-R08:** Setup messages:
 
   | Request | Success response | Notes |
@@ -126,7 +132,7 @@ Each message type has at least one valid fixture. Add fixtures with every messag
 
 ## Acceptance criteria and verification
 
-Rust tests are in `rust/agora-protocol/tests/client_protocol.rs`, named by requirement ID. Server behavior is verified by `agora-server` tests, which are planned for the server PR.
+Rust tests are named by requirement ID. Message types are tested in `rust/agora-protocol/tests/client_protocol.rs`. Server behavior is tested in `rust/agora-server/tests/client_protocol.rs`, which drives a running server over WebSocket; the table marks those tests "server".
 
 | Requirement | Check and expected outcome | Test / fixture |
 | --- | --- | --- |
@@ -137,7 +143,12 @@ Rust tests are in `rust/agora-protocol/tests/client_protocol.rs`, named by requi
 | R06 | Only an exact version match is compatible | `r06_*` |
 | R07 | Only `hello` lacks a request ID | `r07_*` |
 | R09 | Known codes map to their wire names, and unknown codes are preserved | `r09_*` |
-| R04, R07 (server side), R08 (server side) | Handshake, session establishment, request-ID enforcement, and setup behavior | Planned: `agora-server` tests |
+| R01 (server) | Unknown types report their type; invalid JSON, non-objects, missing fields, and binary frames are malformed, echoing any readable request ID | server `r01_*` |
+| R02 (server) | A request with an extra field succeeds | server `r02_*` |
+| R04, R06 (server) | `hello` gets `welcome`; an unsupported version is rejected and the connection closed; requests before `hello` and a second `hello` are rejected | server `r04_*` |
+| R07 (server) | Retries replay results, including errors, without re-executing; conflicts, skipped IDs, and IDs older than the retained results are rejected; sessions number requests independently | server `r07_*` |
+| R08 (server) | Create, join, spawn, and Start succeed with the documented fields; a second session and requests without a session are rejected | server `r08_*` |
+| R09 (server) | Catalog, run, and spawn failures return their codes and details | server `r09_*` |
 
 ## Open questions
 
