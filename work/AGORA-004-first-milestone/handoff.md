@@ -1,10 +1,12 @@
 # Handoff
 
-Checkpoint: 2026-09-25, PR 3 (`agora-server`, part 1), branch `feature/server-setup`. PR 1 (`agora-sim` core) merged as #3, and PR 2 (client protocol) merged as #4.
+Checkpoint: 2026-09-25, PR 3 (`agora-server`, part 1), open as #5 on branch `feature/server-setup`. PR 1 (`agora-sim` core) merged as #3, and PR 2 (client protocol) merged as #4.
 
 ## Resume here
 
-When PR 3 has been reviewed and merged, agree the scope of PR 4 (`agora-server`, part 2: step submission and advancement, observation routing, viewer snapshots, and basic pacing) with the maintainer before implementing it.
+The maintainer is reviewing PR #5. First, check its review comments with `gh pr view 5 --comments` and the inline comments through the GitHub API. Answer questions, and agree any changes before making them on `feature/server-setup`.
+
+Once #5 has merged, agree the scope of PR 4 (`agora-server`, part 2: step submission and advancement, observation routing, viewer snapshots, and basic pacing) with the maintainer before implementing it.
 
 ## Decisions
 
@@ -53,4 +55,6 @@ No CI exists.
 
 - Retrying a lost `create_run` or `join_run` response is unresolved until session recovery.
 - PR 4 adds step, observation, viewer, and pacing messages. Observation batches will be lists, because JSON object keys must be strings.
+- SPEC-003-R03 agent ownership is recorded but not yet observable. Test it in PR 4, when observations are routed by owner.
+- PR 4 will need agent removal in `agora-sim` before expired sessions' agents can be cleaned up.
 - The request log moves from the connection into shared session state when session recovery is built.
