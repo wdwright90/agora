@@ -1,0 +1,12 @@
+[package]
+name = "agora-protocol"
+version = "0.1.0"
+description = "Rust types for Agora's language-neutral client protocol."
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

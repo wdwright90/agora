@@ -34,3 +34,7 @@ The first milestone needs a minimal live viewing path rather than the POC's reco
 ## Acceptance and supersession
 
 The maintainer accepted this package mapping on 2026-09-24, before the first package (`agora-sim`) was created. No foreseeable problems exist under the current design; boundaries can be revised by a later ADR if implementation shows the need. The earlier agreements on reusable profiles and local client launching, Rust-based extensions, and inspection-only playback remain separate requirements.
+
+## Revisions
+
+- 2026-09-24: For the MVP, `agora-sim` does not depend on `agora-protocol`. The server maps simulation types to protocol messages, which keeps wire concerns out of the simulation. Revisit when capability definitions need shared types. The SADD package mapping records the current dependencies.

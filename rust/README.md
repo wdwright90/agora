@@ -6,6 +6,7 @@ This directory is the Cargo workspace for the Rust simulation framework. The [SA
 
 | Package | Purpose | Specs |
 | --- | --- | --- |
+| [`agora-protocol`](agora-protocol/) | Serde types for the client protocol. No networking. Tested against the shared JSON fixtures. | [SPEC-002](../docs/contracts/client-protocol.md) |
 | [`agora-sim`](agora-sim/) | Headless simulation: one run's grid, agents, action collection, and step execution. Uses `bevy_ecs`, with no rendering or networking. | [SPEC-001](../docs/components/simulation/specs/lifecycle-and-movement.md) |
 
 ## Toolchain
