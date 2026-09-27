@@ -1,6 +1,6 @@
 # AGORA-004 — First usable milestone
 
-Status: active
+Status: complete
 Owner: maintainer
 
 ## Goal
@@ -34,6 +34,8 @@ Out of scope for this task:
 
 - Each SADD milestone criterion is demonstrated with the Rust demo client and viewer.
 - Every PR's specs, tests, and documentation are updated together, and its checks pass.
+
+Met on 2026-09-27. The maintainer ran the milestone with the server, the viewer, and two demo clients and confirmed it in the viewer window, and every PR merged with its specs, tests, and documentation (#3, #4, #5, #7, #8, #9, #10, #12, and #13). The [handoff](handoff.md) records the decisions and the follow-ups.
 
 ## Dependencies and open questions
 

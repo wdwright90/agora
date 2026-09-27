@@ -1,12 +1,10 @@
 # Handoff
 
-Checkpoint: 2026-09-27, PR 6 (`agora-viewer`) open as #13 on branch `feature/viewer`, the last PR of the milestone. PR 1 (`agora-sim` core) merged as #3, PR 2 (client protocol) as #4, PR 3 (`agora-server` part 1) as #5, PR 4a (steps and observations) as #7, PR 4b (viewers) as #8, PR 4c (pacing) as #9, PR 5 (`agora-client`) as #10, and ADR-002 as #12.
+Checkpoint: 2026-09-27, AGORA-004 complete. All PRs merged: PR 1 (`agora-sim` core) as #3, PR 2 (client protocol) as #4, PR 3 (`agora-server` part 1) as #5, PR 4a (steps and observations) as #7, PR 4b (viewers) as #8, PR 4c (pacing) as #9, PR 5 (`agora-client`) as #10, ADR-002 as #12, and PR 6 (`agora-viewer`) as #13. The maintainer confirmed the milestone by hand in the viewer.
 
 ## Resume here
 
-Check PR 6's review comments with `gh pr view 13 --comments` and the inline comments through the GitHub API, and agree any changes before making them on `feature/viewer`.
-
-The maintainer ran the milestone's manual check on 2026-09-27 (the server, `agora-viewer --create`, and two `agora-demo join` clients; SPEC-005, "Manual check") and confirmed it in the window. Once PR 6 has merged, mark AGORA-004 completed in its brief and the work index, and agree the next task with the maintainer.
+This task is finished. Agree the next task with the maintainer, starting from the open follow-ups below and the SADD's open questions, and give it a new task record.
 
 ## Decisions
 
@@ -129,3 +127,5 @@ The newest-only view rule is not tested directly; it follows from the channel ty
 - Spawning after Start is still rejected (SPEC-001-R06, SPEC-003-R05).
 - A run started by viewers alone cannot step, because stepping without agents is undefined, and spawning after Start is rejected. The milestone viewer should spawn or wait for agents before Start.
 - The request log moves from the connection into shared session state when session recovery is built.
+- ADR-002's debug channel is not built, and `Agent` and `Position` in `agora-sim` gain `Reflect` with the next simulation change.
+- Capability definitions, post-Start membership, and richer observations are later work in the SADD.
