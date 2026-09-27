@@ -14,7 +14,7 @@ pub use ids::{
     StateId,
 };
 pub use message::{
-    Action, ActionEntry, AgentObservation, ClientMessage, Direction, EntryError, EntryResult,
-    Observation, Placement, RunPhase, ServerMessage,
+    Action, ActionEntry, AgentObservation, AgentView, ClientMessage, Direction, EntryError,
+    EntryResult, Observation, Placement, RunPhase, ServerMessage, View,
 };
 pub use version::{InvalidVersion, PROTOCOL_VERSION, ProtocolVersion};

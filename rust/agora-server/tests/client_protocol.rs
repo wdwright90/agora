@@ -4,8 +4,8 @@
 mod common;
 
 use agora_protocol::{
-    AgentId, ClientMessage, Direction, ErrorCode, PROTOCOL_VERSION, Placement, ProtocolVersion,
-    RunId, RunPhase, ServerMessage, StateId,
+    AgentId, AgentView, ClientMessage, Direction, ErrorCode, PROTOCOL_VERSION, Placement,
+    ProtocolVersion, RunId, RunPhase, ServerMessage, StateId, View,
 };
 use agora_server::RETAINED_RESULTS;
 use common::{
@@ -615,4 +615,59 @@ async fn r11_observations_follow_the_response_that_caused_them() {
         "{reply:?}"
     );
     assert_eq!(client.observations().await, (state(1), vec![first, second]));
+}
+
+#[tokio::test]
+async fn r12_watching_returns_the_current_view() {
+    let address = start_default_server().await;
+    let (mut client, _) = Client::with_new_run(address).await;
+    let first = expect_spawned(client.spawn(cell(0, 9)).await);
+
+    let view = client.watch().await;
+
+    assert_eq!(
+        view,
+        View {
+            state_id: state(0),
+            phase: RunPhase::Setup,
+            width: 10,
+            height: 10,
+            agents: vec![AgentView {
+                agent_id: first,
+                x: 0,
+                y: 9
+            }],
+        }
+    );
+}
+
+#[tokio::test]
+async fn r12_viewers_receive_a_view_after_each_change() {
+    let address = start_default_server().await;
+    let (mut viewer, run_id) = Client::with_new_run(address).await;
+    let mut player = Client::joined(address, &run_id).await;
+    viewer.watch().await;
+
+    let first = expect_spawned(player.spawn(cell(4, 4)).await);
+    let view = viewer.view_update().await;
+    assert_eq!((view.state_id, view.phase), (state(0), RunPhase::Setup));
+    assert_eq!(view.agents.len(), 1);
+
+    viewer.start().await;
+    let view = viewer.view_update().await;
+    assert_eq!((view.state_id, view.phase), (state(0), RunPhase::Started));
+
+    player
+        .submit(state(0), vec![step(first, Direction::East, 1)])
+        .await;
+    let view = viewer.view_update().await;
+    assert_eq!(view.state_id, state(1));
+    assert_eq!(
+        view.agents,
+        [AgentView {
+            agent_id: first,
+            x: 5,
+            y: 4
+        }]
+    );
 }

@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use agora_protocol::{
     Action, ActionEntry, AgentId, CatalogEntryId, ClientMessage, Direction, EntryResult, ErrorCode,
-    ErrorResponse, PROTOCOL_VERSION, Placement, RequestId, RunId, ServerMessage, StateId,
+    ErrorResponse, PROTOCOL_VERSION, Placement, RequestId, RunId, ServerMessage, StateId, View,
 };
 use agora_server::{EMPTY_GRID_10X10, ServerConfig, serve};
 use futures_util::{SinkExt, StreamExt};
@@ -100,8 +100,10 @@ pub fn expect_code(message: ServerMessage, code: ErrorCode) -> ErrorResponse {
 pub struct Client {
     socket: WebSocketStream<MaybeTlsStream<TcpStream>>,
     next_request: u64,
-    /// Pushed `observations` messages set aside by [`Client::receive`].
+    /// Pushed `observations` messages not yet taken by [`Client::observations`].
     observations: VecDeque<ServerMessage>,
+    /// Pushed views not yet taken by [`Client::view_update`].
+    views: VecDeque<View>,
 }
 
 impl Client {
@@ -112,6 +114,7 @@ impl Client {
             socket,
             next_request: 1,
             observations: VecDeque::new(),
+            views: VecDeque::new(),
         }
     }
 
@@ -170,37 +173,61 @@ impl Client {
             .await;
     }
 
-    /// The next message that is not a pushed `observations` message. Observations received
-    /// meanwhile are kept for [`Client::observations`].
+    /// Receive a message, setting pushes aside. Returns `None` for a push.
+    async fn receive_or_set_aside(&mut self) -> Option<ServerMessage> {
+        match self.receive_raw().await {
+            message @ ServerMessage::Observations { .. } => self.observations.push_back(message),
+            ServerMessage::ViewUpdate { view } => self.views.push_back(view),
+            message => return Some(message),
+        }
+        None
+    }
+
+    /// The next message that is not a push. Pushes received meanwhile are kept for
+    /// [`Client::observations`] and [`Client::view_update`].
     pub async fn receive(&mut self) -> ServerMessage {
         loop {
-            match self.receive_raw().await {
-                message @ ServerMessage::Observations { .. } => {
-                    self.observations.push_back(message)
-                }
-                message => return message,
+            if let Some(message) = self.receive_or_set_aside().await {
+                return message;
             }
         }
     }
 
     /// The next pushed `observations` message, as `(state_id, agent IDs)`.
     pub async fn observations(&mut self) -> (StateId, Vec<AgentId>) {
-        let message = match self.observations.pop_front() {
-            Some(message) => message,
-            None => self.receive_raw().await,
-        };
-        match message {
-            ServerMessage::Observations {
-                state_id,
-                observations,
-            } => (state_id, observations.iter().map(|o| o.agent_id).collect()),
-            other => panic!("expected observations, got {other:?}"),
+        loop {
+            if let Some(message) = self.observations.pop_front() {
+                let ServerMessage::Observations {
+                    state_id,
+                    observations,
+                } = message
+                else {
+                    unreachable!("only observations are kept here");
+                };
+                return (state_id, observations.iter().map(|o| o.agent_id).collect());
+            }
+            if let Some(message) = self.receive_or_set_aside().await {
+                panic!("expected observations, got {message:?}");
+            }
+        }
+    }
+
+    /// The next pushed view.
+    pub async fn view_update(&mut self) -> View {
+        loop {
+            if let Some(view) = self.views.pop_front() {
+                return view;
+            }
+            if let Some(message) = self.receive_or_set_aside().await {
+                panic!("expected a view update, got {message:?}");
+            }
         }
     }
 
     /// Require that no message arrives within `wait`.
     pub async fn expect_silence(&mut self, wait: Duration) {
         assert!(self.observations.is_empty(), "{:?}", self.observations);
+        assert!(self.views.is_empty(), "{:?}", self.views);
         if let Ok(frame) = tokio::time::timeout(wait, self.socket.next()).await {
             panic!("expected no message, got {frame:?}");
         }
@@ -269,6 +296,15 @@ impl Client {
     pub async fn start(&mut self) -> ServerMessage {
         let request_id = self.next_id();
         self.exchange(&ClientMessage::Start { request_id }).await
+    }
+
+    /// Watch the run, returning the view in the `watching` response.
+    pub async fn watch(&mut self) -> View {
+        let request_id = self.next_id();
+        match self.exchange(&ClientMessage::Watch { request_id }).await {
+            ServerMessage::Watching { view, .. } => view,
+            other => panic!("expected watching, got {other:?}"),
+        }
     }
 
     pub async fn submit(&mut self, state_id: StateId, actions: Vec<ActionEntry>) -> ServerMessage {

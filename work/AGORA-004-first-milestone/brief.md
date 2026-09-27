@@ -16,7 +16,8 @@ The work is delivered as a sequence of small PRs against `develop`, following th
 3. `agora-server`, part 1: WebSocket host; create, join, and spawn; creator-only Start.
 4. `agora-server`, part 2, split in two on 2026-09-26:
    - 4a: action submission, step advancement, observation routing, and removing an expired session's agents (with immediate removal in `agora-sim`).
-   - 4b: viewer subscriptions and snapshots, viewer-aware Start eligibility, and pacing controls.
+   - 4b: viewers (`watch` and newest-only view updates), viewer-aware Start eligibility, and a fixed step interval while viewers watch.
+   - 4c: pacing controls: pause, single-step, rate changes, unlimited, and pacing-controller claims and handover.
 5. `agora-client`: Rust library and a demo random-mover client.
 6. `agora-viewer`: Bevy rendering of the grid and agents, with run creation, Start, and pause controls.
 
