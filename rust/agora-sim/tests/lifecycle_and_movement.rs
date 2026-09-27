@@ -5,8 +5,8 @@ use std::collections::BTreeSet;
 
 use agora_sim::{
     AdvanceError, AgentId, AgentLimitError, ConfigError, Direction, GridPos, Move, Placement,
-    SimConfig, Simulation, SpawnError, StartError, StateId, Status, Submission, SubmitError,
-    ViewState,
+    RemoveError, SimConfig, Simulation, SpawnError, StartError, StateId, Status, Submission,
+    SubmitError, ViewState,
 };
 
 fn sim(width: u32, height: u32, seed: u64) -> Simulation {
@@ -578,4 +578,86 @@ fn r17_same_seed_and_inputs_reproduce_identical_histories() {
 #[test]
 fn r17_different_seeds_can_produce_different_histories() {
     assert_ne!(scripted_history(1), scripted_history(2));
+}
+
+#[test]
+fn r18_removal_frees_the_cell_without_changing_the_state() {
+    let mut sim = sim(3, 3, 0);
+    let a = spawn_at(&mut sim, 1, 1);
+    let b = spawn_at(&mut sim, 2, 2);
+
+    assert_eq!(sim.remove(a), Ok(()));
+
+    assert_eq!(sim.agent_count(), 1);
+    assert_eq!(sim.readiness().state, StateId(0));
+    assert_eq!(
+        sim.view().agents.iter().map(|v| v.id).collect::<Vec<_>>(),
+        [b]
+    );
+    // The cell is free, and the removed agent's ID is not reused.
+    assert_eq!(
+        sim.spawn(Placement::Cell(GridPos::new(1, 1))),
+        Ok(AgentId(3))
+    );
+}
+
+#[test]
+fn r18_removing_an_unknown_agent_fails() {
+    let mut sim = sim(3, 3, 0);
+    let a = spawn_at(&mut sim, 0, 0);
+    sim.remove(a).unwrap();
+
+    assert_eq!(sim.remove(a), Err(RemoveError::UnknownAgent(a)));
+    assert_eq!(
+        sim.remove(AgentId(99)),
+        Err(RemoveError::UnknownAgent(AgentId(99)))
+    );
+}
+
+#[test]
+fn r18_removing_the_only_missing_agent_makes_the_run_ready() {
+    let mut sim = sim(3, 3, 0);
+    let a = spawn_at(&mut sim, 0, 0);
+    let b = spawn_at(&mut sim, 2, 2);
+    sim.start().unwrap();
+    submit(&mut sim, a, Move::step(Direction::North)).unwrap();
+
+    sim.remove(b).unwrap();
+
+    assert!(sim.readiness().is_ready());
+    let observations = sim.advance().unwrap();
+    assert_eq!(observations.state, StateId(1));
+    assert_eq!(
+        observations.by_agent.keys().copied().collect::<Vec<_>>(),
+        [a]
+    );
+    assert_eq!(position(&sim, a), GridPos::new(0, 1));
+}
+
+#[test]
+fn r18_removal_discards_an_accepted_action() {
+    let mut sim = sim(3, 3, 0);
+    let a = spawn_at(&mut sim, 0, 0);
+    let b = spawn_at(&mut sim, 2, 2);
+    sim.start().unwrap();
+    submit(&mut sim, b, Move::step(Direction::West)).unwrap();
+
+    sim.remove(b).unwrap();
+
+    assert_eq!(
+        sim.readiness().status,
+        Status::Collecting { missing: vec![a] }
+    );
+}
+
+#[test]
+fn r18_removing_every_agent_leaves_a_started_empty_run() {
+    let mut sim = sim(3, 3, 0);
+    let a = spawn_at(&mut sim, 0, 0);
+    sim.start().unwrap();
+
+    sim.remove(a).unwrap();
+
+    assert_eq!(sim.readiness().status, Status::StartedEmpty);
+    assert_eq!(sim.readiness().state, StateId(0));
 }

@@ -4,12 +4,13 @@
 mod common;
 
 use agora_protocol::{
-    AgentId, ClientMessage, ErrorCode, PROTOCOL_VERSION, Placement, ProtocolVersion, RunId,
-    RunPhase, ServerMessage, StateId,
+    AgentId, AgentView, ClientMessage, Direction, ErrorCode, IntervalMs, PROTOCOL_VERSION, Pacing,
+    PacingMode, Placement, ProtocolVersion, RunId, RunPhase, ServerMessage, StateId, View,
 };
 use agora_server::RETAINED_RESULTS;
 use common::{
-    Client, cell, empty_grid, expect_code, expect_error, request_id, start_default_server,
+    Client, cell, empty_grid, expect_code, expect_error, expect_spawned, expect_submitted,
+    request_id, start_default_server, state, stay, step,
 };
 use serde_json::json;
 
@@ -100,7 +101,7 @@ async fn r04_r06_an_unsupported_version_is_rejected_and_the_connection_closed() 
 
     let reply = client
         .exchange(&ClientMessage::Hello {
-            protocol_version: ProtocolVersion::new(0, 2, 0),
+            protocol_version: ProtocolVersion::new(0, 1, 0),
         })
         .await;
 
@@ -109,7 +110,7 @@ async fn r04_r06_an_unsupported_version_is_rejected_and_the_connection_closed() 
     let details = serde_json::Value::Object(error.details.unwrap());
     assert_eq!(
         details,
-        json!({ "requested": "0.2.0", "supported": [PROTOCOL_VERSION.to_string()] })
+        json!({ "requested": "0.1.0", "supported": [PROTOCOL_VERSION.to_string()] })
     );
     client.expect_closed().await;
 }
@@ -504,4 +505,224 @@ async fn r09_errors_carry_a_message_for_people() {
     let error = expect_error(client.start().await);
 
     assert!(!error.message.is_empty());
+}
+
+#[tokio::test]
+async fn r10_submitted_reports_each_entry_in_order() {
+    let address = start_default_server().await;
+    let (mut client, _) = Client::with_new_run(address).await;
+    let first = expect_spawned(client.spawn(cell(0, 0)).await);
+    let second = expect_spawned(client.spawn(cell(5, 5)).await);
+    client.start().await;
+    let unknown = agent(99);
+
+    let reply = client
+        .submit(
+            state(0),
+            vec![
+                step(first, Direction::North, 2),
+                stay(second),
+                step(first, Direction::North, 1),
+                stay(first),
+                stay(unknown),
+            ],
+        )
+        .await;
+
+    let ServerMessage::Submitted {
+        state_id, results, ..
+    } = reply
+    else {
+        panic!("expected submitted, got {reply:?}");
+    };
+    assert_eq!(state_id, state(0));
+    let summary: Vec<_> = results
+        .iter()
+        .map(|r| (r.agent_id, r.error.as_ref().map(|e| e.code.clone())))
+        .collect();
+    assert_eq!(
+        summary,
+        [
+            (first, Some(ErrorCode::DistanceBudgetExceeded)),
+            (second, None),
+            (first, None),
+            (first, Some(ErrorCode::AlreadySubmitted)),
+            (unknown, Some(ErrorCode::AgentNotOwned)),
+        ]
+    );
+    let details = serde_json::Value::Object(results[0].error.clone().unwrap().details.unwrap());
+    assert_eq!(details, json!({ "distance": 2, "budget": 1 }));
+}
+
+#[tokio::test]
+async fn r10_submitting_before_start_is_rejected() {
+    let address = start_default_server().await;
+    let (mut client, _) = Client::with_new_run(address).await;
+    let first = expect_spawned(client.spawn(Placement::Random).await);
+
+    expect_code(
+        client.submit(state(0), vec![stay(first)]).await,
+        ErrorCode::RunNotStarted,
+    );
+}
+
+#[tokio::test]
+async fn r10_submitting_for_another_state_is_rejected() {
+    let address = start_default_server().await;
+    let (mut client, _) = Client::with_new_run(address).await;
+    let first = expect_spawned(client.spawn(Placement::Random).await);
+    client.start().await;
+
+    let error = expect_code(
+        client.submit(state(1), vec![stay(first)]).await,
+        ErrorCode::WrongState,
+    );
+
+    let details = serde_json::Value::Object(error.details.unwrap());
+    assert_eq!(details, json!({ "expected": 0, "supplied": 1 }));
+    // The rejected submission did not fill the agent's slot.
+    let results = expect_submitted(client.submit(state(0), vec![stay(first)]).await);
+    assert_eq!(results[0].error, None);
+}
+
+#[tokio::test]
+async fn r11_observations_follow_the_response_that_caused_them() {
+    let address = start_default_server().await;
+    let (mut client, _) = Client::with_new_run(address).await;
+    let first = expect_spawned(client.spawn(Placement::Random).await);
+    let second = expect_spawned(client.spawn(Placement::Random).await);
+
+    let request_id = client.next_id();
+    client.send(&ClientMessage::Start { request_id }).await;
+    assert_eq!(
+        client.receive_raw().await,
+        ServerMessage::Started { request_id }
+    );
+    assert_eq!(client.observations().await, (state(0), vec![first, second]));
+
+    client.submit(state(0), vec![stay(second)]).await;
+    let request_id = client.next_id();
+    client
+        .send(&ClientMessage::Submit {
+            request_id,
+            state_id: state(0),
+            actions: vec![stay(first)],
+        })
+        .await;
+    let reply = client.receive_raw().await;
+    assert!(
+        matches!(reply, ServerMessage::Submitted { .. }),
+        "{reply:?}"
+    );
+    assert_eq!(client.observations().await, (state(1), vec![first, second]));
+}
+
+#[tokio::test]
+async fn r12_watching_returns_the_current_view() {
+    let address = start_default_server().await;
+    let (mut client, _) = Client::with_new_run(address).await;
+    let first = expect_spawned(client.spawn(cell(0, 9)).await);
+
+    let view = client.watch().await;
+
+    assert_eq!(
+        view,
+        View {
+            state_id: state(0),
+            phase: RunPhase::Setup,
+            width: 10,
+            height: 10,
+            agents: vec![AgentView {
+                agent_id: first,
+                x: 0,
+                y: 9
+            }],
+        }
+    );
+}
+
+#[tokio::test]
+async fn r12_viewers_receive_a_view_after_each_change() {
+    let address = start_default_server().await;
+    let (mut viewer, run_id) = Client::with_new_run(address).await;
+    let mut player = Client::joined(address, &run_id).await;
+    viewer.watch().await;
+
+    let first = expect_spawned(player.spawn(cell(4, 4)).await);
+    let view = viewer.view_update().await;
+    assert_eq!((view.state_id, view.phase), (state(0), RunPhase::Setup));
+    assert_eq!(view.agents.len(), 1);
+
+    viewer.start().await;
+    let view = viewer.view_update().await;
+    assert_eq!((view.state_id, view.phase), (state(0), RunPhase::Started));
+
+    player
+        .submit(state(0), vec![step(first, Direction::East, 1)])
+        .await;
+    let view = viewer.view_update().await;
+    assert_eq!(view.state_id, state(1));
+    assert_eq!(
+        view.agents,
+        [AgentView {
+            agent_id: first,
+            x: 5,
+            y: 4
+        }]
+    );
+}
+
+#[tokio::test]
+async fn r13_pacing_requests_receive_their_responses_and_updates() {
+    let address = start_default_server().await;
+    let (mut viewer, _) = Client::with_new_run(address).await;
+
+    let (_, pacing) = viewer.watch_with_pacing().await;
+    assert_eq!(
+        pacing,
+        Pacing {
+            mode: PacingMode::Interval {
+                ms: IntervalMs::new(500).unwrap()
+            },
+            you_control: false
+        }
+    );
+
+    let reply = viewer.claim_pacing().await;
+    assert!(
+        matches!(reply, ServerMessage::PacingClaimed { .. }),
+        "{reply:?}"
+    );
+    assert!(viewer.pacing_update().await.you_control);
+
+    let reply = viewer.set_pacing(PacingMode::Paused).await;
+    assert!(
+        matches!(reply, ServerMessage::PacingSet { .. }),
+        "{reply:?}"
+    );
+    assert_eq!(viewer.pacing_update().await.mode, PacingMode::Paused);
+
+    let reply = viewer.step_once().await;
+    assert!(
+        matches!(reply, ServerMessage::StepGranted { .. }),
+        "{reply:?}"
+    );
+}
+
+#[tokio::test]
+async fn r13_pacing_requests_report_their_errors() {
+    let address = start_default_server().await;
+    let (mut first, run_id) = Client::with_new_run(address).await;
+    let mut second = Client::joined(address, &run_id).await;
+
+    expect_code(first.claim_pacing().await, ErrorCode::NotViewing);
+    first.watch_and_control().await;
+    second.watch().await;
+    expect_code(second.claim_pacing().await, ErrorCode::PacingControlHeld);
+    expect_code(
+        second.set_pacing(PacingMode::Unlimited).await,
+        ErrorCode::NotPacingController,
+    );
+    expect_code(second.step_once().await, ErrorCode::NotPacingController);
+    expect_code(first.step_once().await, ErrorCode::RunNotPaused);
 }

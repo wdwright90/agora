@@ -2,12 +2,14 @@
 
 #![allow(dead_code, reason = "each test file uses a different subset")]
 
+use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::time::Duration;
 
 use agora_protocol::{
-    CatalogEntryId, ClientMessage, ErrorCode, ErrorResponse, PROTOCOL_VERSION, Placement,
-    RequestId, RunId, ServerMessage,
+    Action, ActionEntry, AgentId, CatalogEntryId, ClientMessage, Direction, EntryResult, ErrorCode,
+    ErrorResponse, PROTOCOL_VERSION, Pacing, PacingMode, Placement, RequestId, RunId,
+    ServerMessage, StateId, View,
 };
 use agora_server::{EMPTY_GRID_10X10, ServerConfig, serve};
 use futures_util::{SinkExt, StreamExt};
@@ -42,6 +44,46 @@ pub fn cell(x: u32, y: u32) -> Placement {
     Placement::Cell { x, y }
 }
 
+pub fn agent(n: u64) -> AgentId {
+    AgentId::new(n).unwrap()
+}
+
+pub fn state(n: u64) -> StateId {
+    StateId::new(n).unwrap()
+}
+
+/// An action entry moving `agent` by `distance` in `direction`.
+pub fn step(agent: AgentId, direction: Direction, distance: u32) -> ActionEntry {
+    ActionEntry {
+        agent_id: agent,
+        action: Action::Move {
+            direction,
+            distance,
+        },
+    }
+}
+
+/// An action entry keeping `agent` in place.
+pub fn stay(agent: AgentId) -> ActionEntry {
+    step(agent, Direction::North, 0)
+}
+
+/// The entry results of a `submitted` response, failing the test on any other message.
+pub fn expect_submitted(message: ServerMessage) -> Vec<EntryResult> {
+    match message {
+        ServerMessage::Submitted { results, .. } => results,
+        other => panic!("expected submitted, got {other:?}"),
+    }
+}
+
+/// The spawned agent's ID, failing the test on any other message.
+pub fn expect_spawned(message: ServerMessage) -> AgentId {
+    match message {
+        ServerMessage::Spawned { agent_id, .. } => agent_id,
+        other => panic!("expected spawned, got {other:?}"),
+    }
+}
+
 /// Unwrap an error response, failing the test on any other message.
 pub fn expect_error(message: ServerMessage) -> ErrorResponse {
     match message {
@@ -59,6 +101,12 @@ pub fn expect_code(message: ServerMessage, code: ErrorCode) -> ErrorResponse {
 pub struct Client {
     socket: WebSocketStream<MaybeTlsStream<TcpStream>>,
     next_request: u64,
+    /// Pushed `observations` messages not yet taken by [`Client::observations`].
+    observations: VecDeque<ServerMessage>,
+    /// Pushed views not yet taken by [`Client::view_update`].
+    views: VecDeque<View>,
+    /// Pushed pacing states not yet taken by [`Client::pacing_update`].
+    pacings: VecDeque<Pacing>,
 }
 
 impl Client {
@@ -68,6 +116,9 @@ impl Client {
         Self {
             socket,
             next_request: 1,
+            observations: VecDeque::new(),
+            views: VecDeque::new(),
+            pacings: VecDeque::new(),
         }
     }
 
@@ -126,7 +177,82 @@ impl Client {
             .await;
     }
 
+    /// Receive a message, setting pushes aside. Returns `None` for a push.
+    async fn receive_or_set_aside(&mut self) -> Option<ServerMessage> {
+        match self.receive_raw().await {
+            message @ ServerMessage::Observations { .. } => self.observations.push_back(message),
+            ServerMessage::ViewUpdate { view } => self.views.push_back(view),
+            ServerMessage::PacingUpdate { pacing } => self.pacings.push_back(pacing),
+            message => return Some(message),
+        }
+        None
+    }
+
+    /// The next message that is not a push. Pushes received meanwhile are kept for
+    /// [`Client::observations`] and [`Client::view_update`].
     pub async fn receive(&mut self) -> ServerMessage {
+        loop {
+            if let Some(message) = self.receive_or_set_aside().await {
+                return message;
+            }
+        }
+    }
+
+    /// The next pushed `observations` message, as `(state_id, agent IDs)`.
+    pub async fn observations(&mut self) -> (StateId, Vec<AgentId>) {
+        loop {
+            if let Some(message) = self.observations.pop_front() {
+                let ServerMessage::Observations {
+                    state_id,
+                    observations,
+                } = message
+                else {
+                    unreachable!("only observations are kept here");
+                };
+                return (state_id, observations.iter().map(|o| o.agent_id).collect());
+            }
+            if let Some(message) = self.receive_or_set_aside().await {
+                panic!("expected observations, got {message:?}");
+            }
+        }
+    }
+
+    /// The next pushed view.
+    pub async fn view_update(&mut self) -> View {
+        loop {
+            if let Some(view) = self.views.pop_front() {
+                return view;
+            }
+            if let Some(message) = self.receive_or_set_aside().await {
+                panic!("expected a view update, got {message:?}");
+            }
+        }
+    }
+
+    /// The next pushed pacing state.
+    pub async fn pacing_update(&mut self) -> Pacing {
+        loop {
+            if let Some(pacing) = self.pacings.pop_front() {
+                return pacing;
+            }
+            if let Some(message) = self.receive_or_set_aside().await {
+                panic!("expected a pacing update, got {message:?}");
+            }
+        }
+    }
+
+    /// Require that no message arrives within `wait`.
+    pub async fn expect_silence(&mut self, wait: Duration) {
+        assert!(self.observations.is_empty(), "{:?}", self.observations);
+        assert!(self.views.is_empty(), "{:?}", self.views);
+        assert!(self.pacings.is_empty(), "{:?}", self.pacings);
+        if let Ok(frame) = tokio::time::timeout(wait, self.socket.next()).await {
+            panic!("expected no message, got {frame:?}");
+        }
+    }
+
+    /// The next message of any kind, in arrival order.
+    pub async fn receive_raw(&mut self) -> ServerMessage {
         loop {
             let frame = tokio::time::timeout(RECEIVE_TIMEOUT, self.socket.next())
                 .await
@@ -188,6 +314,58 @@ impl Client {
     pub async fn start(&mut self) -> ServerMessage {
         let request_id = self.next_id();
         self.exchange(&ClientMessage::Start { request_id }).await
+    }
+
+    /// Watch the run, returning the view in the `watching` response.
+    pub async fn watch(&mut self) -> View {
+        self.watch_with_pacing().await.0
+    }
+
+    /// Watch the run, returning the view and pacing state in the `watching` response.
+    pub async fn watch_with_pacing(&mut self) -> (View, Pacing) {
+        let request_id = self.next_id();
+        match self.exchange(&ClientMessage::Watch { request_id }).await {
+            ServerMessage::Watching { view, pacing, .. } => (view, pacing),
+            other => panic!("expected watching, got {other:?}"),
+        }
+    }
+
+    pub async fn claim_pacing(&mut self) -> ServerMessage {
+        let request_id = self.next_id();
+        self.exchange(&ClientMessage::ClaimPacing { request_id })
+            .await
+    }
+
+    pub async fn set_pacing(&mut self, mode: PacingMode) -> ServerMessage {
+        let request_id = self.next_id();
+        self.exchange(&ClientMessage::SetPacing { request_id, mode })
+            .await
+    }
+
+    pub async fn step_once(&mut self) -> ServerMessage {
+        let request_id = self.next_id();
+        self.exchange(&ClientMessage::StepOnce { request_id }).await
+    }
+
+    /// Watch, claim pacing control, and consume the resulting pacing update.
+    pub async fn watch_and_control(&mut self) {
+        self.watch().await;
+        let reply = self.claim_pacing().await;
+        assert!(
+            matches!(reply, ServerMessage::PacingClaimed { .. }),
+            "{reply:?}"
+        );
+        assert!(self.pacing_update().await.you_control);
+    }
+
+    pub async fn submit(&mut self, state_id: StateId, actions: Vec<ActionEntry>) -> ServerMessage {
+        let request_id = self.next_id();
+        self.exchange(&ClientMessage::Submit {
+            request_id,
+            state_id,
+            actions,
+        })
+        .await
     }
 
     /// Require that the server closes the connection next.

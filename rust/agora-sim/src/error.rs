@@ -57,6 +57,12 @@ pub enum AgentLimitError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum RemoveError {
+    #[error("{0} does not exist")]
+    UnknownAgent(AgentId),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum AdvanceError {
     #[error("the run has not started")]
     NotStarted,

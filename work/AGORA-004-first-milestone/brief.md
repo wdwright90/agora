@@ -14,7 +14,10 @@ The work is delivered as a sequence of small PRs against `develop`, following th
 1. `agora-sim` core: grid, setup spawning, Start, submission, readiness, advancement, viewer state ([SPEC-001](../../docs/components/simulation/specs/lifecycle-and-movement.md)).
 2. Minimal protocol contract and `agora-protocol`: JSON envelope, versioning, errors, and the messages the milestone needs, with fixtures.
 3. `agora-server`, part 1: WebSocket host; create, join, and spawn; creator-only Start.
-4. `agora-server`, part 2: submission and advancement, observation routing, viewer snapshots, and basic pacing.
+4. `agora-server`, part 2, split in two on 2026-09-26:
+   - 4a: action submission, step advancement, observation routing, and removing an expired session's agents (with immediate removal in `agora-sim`).
+   - 4b: viewers (`watch` and newest-only view updates), viewer-aware Start eligibility, and a fixed step interval while viewers watch.
+   - 4c: pacing controls: pause, single-step, rate changes, unlimited, and pacing-controller claims and handover.
 5. `agora-client`: Rust library and a demo random-mover client.
 6. `agora-viewer`: Bevy rendering of the grid and agents, with run creation, Start, and pause controls.
 

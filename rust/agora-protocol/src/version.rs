@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// The protocol version implemented by this crate.
-pub const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::new(0, 1, 0);
+pub const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::new(0, 4, 0);
 
 /// Semantic version of the client protocol, written as `"MAJOR.MINOR.PATCH"`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

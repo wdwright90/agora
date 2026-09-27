@@ -8,6 +8,7 @@
 mod catalog;
 mod config;
 mod connection;
+mod pacing;
 mod registry;
 mod requests;
 mod run;
@@ -27,11 +28,14 @@ use crate::registry::Registry;
 /// Accept connections on `listener` and serve them. Runs until the task is dropped.
 pub async fn serve(listener: TcpListener, config: ServerConfig) {
     let registry = Registry::default();
+    // Connections are numbered in acceptance order, which orders pacing handover.
+    let mut accepted: u64 = 0;
     loop {
         match listener.accept().await {
             Ok((stream, peer)) => {
+                accepted += 1;
                 tokio::spawn(
-                    connection::serve(stream, registry.clone(), config)
+                    connection::serve(stream, accepted, registry.clone(), config)
                         .instrument(info_span!("connection", %peer)),
                 );
             }
