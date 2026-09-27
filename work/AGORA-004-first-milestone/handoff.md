@@ -1,10 +1,10 @@
 # Handoff
 
-Checkpoint: 2026-09-27, PR 5 (`agora-client`) on branch `feature/client`. PR 1 (`agora-sim` core) merged as #3, PR 2 (client protocol) as #4, PR 3 (`agora-server` part 1) as #5, PR 4a (steps and observations) as #7, PR 4b (viewers) as #8, and PR 4c (pacing) as #9. The server side of the milestone is complete.
+Checkpoint: 2026-09-27, PR 5 (`agora-client`) open as #10 on branch `feature/client`. PR 1 (`agora-sim` core) merged as #3, PR 2 (client protocol) as #4, PR 3 (`agora-server` part 1) as #5, PR 4a (steps and observations) as #7, PR 4b (viewers) as #8, and PR 4c (pacing) as #9. The server side of the milestone is complete.
 
 ## Resume here
 
-Check PR 5's review comments with `gh pr view <number> --comments` and the inline comments through the GitHub API. Answer questions, and agree any changes before making them on `feature/client`.
+Check PR 5's review comments with `gh pr view 10 --comments` and the inline comments through the GitHub API. Answer questions, and agree any changes before making them on `feature/client`.
 
 Once PR 5 has merged, the last step is PR 6 (`agora-viewer`). It needs a viewer CDD first, agreed with the maintainer before implementing; the maintainer asked on #8 how views will be drawn, and the answer sketched Bevy sprites synced from complete views, a background network task, and interpolation between steps.
 
