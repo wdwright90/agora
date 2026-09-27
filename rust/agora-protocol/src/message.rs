@@ -148,6 +148,29 @@ pub enum ServerMessage {
     Error(ErrorResponse),
 }
 
+impl ServerMessage {
+    /// The request ID of a response or an error. `None` for `welcome`, pushes, and errors
+    /// without a usable request ID.
+    pub fn request_id(&self) -> Option<RequestId> {
+        match self {
+            Self::RunCreated { request_id, .. }
+            | Self::RunJoined { request_id, .. }
+            | Self::Spawned { request_id, .. }
+            | Self::Started { request_id }
+            | Self::Submitted { request_id, .. }
+            | Self::Watching { request_id, .. }
+            | Self::PacingClaimed { request_id }
+            | Self::PacingSet { request_id }
+            | Self::StepGranted { request_id } => Some(*request_id),
+            Self::Error(error) => error.request_id,
+            Self::Welcome { .. }
+            | Self::Observations { .. }
+            | Self::ViewUpdate { .. }
+            | Self::PacingUpdate { .. } => None,
+        }
+    }
+}
+
 /// Spawn placement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
