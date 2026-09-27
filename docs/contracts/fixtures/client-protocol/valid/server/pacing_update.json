@@ -1,0 +1,1 @@
+{ "type": "pacing_update", "pacing": { "mode": { "kind": "paused" }, "you_control": true } }

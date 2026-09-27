@@ -1,12 +1,12 @@
 # Handoff
 
-Checkpoint: 2026-09-26, PR 4b (`agora-server` viewers) open as #8 on branch `feature/server-viewers`. PR 1 (`agora-sim` core) merged as #3, PR 2 (client protocol) as #4, PR 3 (`agora-server` part 1) as #5, and PR 4a (steps and observations) as #7.
+Checkpoint: 2026-09-27, PR 4c (`agora-server` pacing) on branch `feature/server-pacing`. PR 1 (`agora-sim` core) merged as #3, PR 2 (client protocol) as #4, PR 3 (`agora-server` part 1) as #5, PR 4a (steps and observations) as #7, and PR 4b (viewers) as #8. With 4c, the server side of the milestone is complete.
 
 ## Resume here
 
-Check PR 4b's review comments with `gh pr view 8 --comments` and the inline comments through the GitHub API. Answer questions, and agree any changes before making them on `feature/server-viewers`.
+Check PR 4c's review comments with `gh pr view <number> --comments` and the inline comments through the GitHub API. Answer questions, and agree any changes before making them on `feature/server-pacing`.
 
-Once 4b has merged, agree the scope of PR 4c (pacing controls: pause, single-step, rate changes, unlimited, and controller claims and handover) with the maintainer before implementing it.
+Once 4c has merged, agree the scope of PR 5 (`agora-client`: the Rust client library and a random-mover demo client) with the maintainer before implementing it. The viewer (PR 6) needs a viewer CDD first; the maintainer asked on #8 how views will be drawn, and the answer sketched Bevy sprites synced from complete views, a background network task, and interpolation between steps.
 
 ## Decisions
 
@@ -43,6 +43,25 @@ Once 4b has merged, agree the scope of PR 4c (pacing controls: pause, single-ste
     - Watching twice returns the current view again rather than an error.
     - Views are published after a spawn, Start, a step, and an expiry removal, through a Tokio `watch` channel per connection, which keeps only the newest view.
     - The step interval (`--step-interval-ms`, default 500 ms) applies only while a viewer is connected, measured between step starts. The first step after Start is not held. When the last viewer leaves, a held step executes at once.
+  - Agreed for 4c (2026-09-27):
+    - Pacing control is claimed explicitly with `claim_pacing`; the viewer app will claim right after `watch`.
+    - `watching` carries a `pacing {mode, you_control}` state, and `pacing_update` pushes it to every viewer on any mode or controller change.
+    - `step_once` is answered with `step_granted` at once; the viewer waits for the `view_update`.
+    - Intervals range from 1 ms to one hour; `unlimited` is a separate mode.
+  - Choices made in 4c, open to review:
+    - Protocol 0.4.0. Modes are tagged by `kind`: `paused`, `unlimited`, and `interval` with `ms`.
+    - The first viewer resets the mode to the default interval with no controller; the last viewer leaving makes the run unlimited. Claiming control you already hold succeeds.
+    - Grants do not accumulate, and any mode change cancels an unused grant.
+    - A new interval is measured from the previous step's start.
+    - Connections are numbered in acceptance order to pick the handover successor.
+    - The pacing state machine lives in `agora-server/src/pacing.rs`.
+
+## PR 4c contents
+
+- `agora-protocol`: version 0.4.0; `claim_pacing`, `set_pacing`, `step_once`, their responses, and `pacing_update`; `pacing` in `watching`; `IntervalMs`, `PacingMode`, and `Pacing`; four new error codes. New fixtures, and version fixtures bumped.
+- `agora-server`: the pacer module, pacing commands in the run task, handover to the oldest connection, connection numbering, and a bounded `--step-interval-ms`.
+- Specs: SPEC-002-R12 updated and R13 added; SPEC-003-R11 rewritten, and R12 to R14 added.
+- CDD-002, the SADD's pacing-timing sentence, `rust/README.md`, and the work index updated.
 
 ## PR 4b contents
 
@@ -56,9 +75,9 @@ Once 4b has merged, agree the scope of PR 4c (pacing controls: pause, single-ste
 In `rust/`:
 
 - `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo doc --no-deps --workspace` with `-D warnings`: all passed.
-- `cargo test --workspace`: 97 passed (35 in agora-sim, 12 in agora-protocol, and 50 in agora-server: 2 unit, 29 SPEC-002, and 19 SPEC-003).
-- The SPEC-003 timer tests passed in 8 consecutive runs.
-- `agora-server --help` shows the new flag.
+- `cargo test --workspace`: 104 passed (35 in agora-sim, 12 in agora-protocol, and 57 in agora-server: 2 unit, 31 SPEC-002, and 24 SPEC-003).
+- The agora-server tests passed in 8 consecutive runs.
+- `agora-server --step-interval-ms 0` is rejected by the argument parser.
 
 The newest-only view rule is not tested directly; it follows from the channel type. No manual run against a live client was done; the demo client arrives in PR 5. No CI exists.
 

@@ -6,7 +6,9 @@ mod common;
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
-use agora_protocol::{Direction, ErrorCode, Placement, RunPhase, ServerMessage};
+use agora_protocol::{
+    Direction, ErrorCode, IntervalMs, Pacing, PacingMode, Placement, RunPhase, ServerMessage,
+};
 use agora_server::ServerConfig;
 use common::{
     Client, cell, expect_code, expect_spawned, expect_submitted, start_default_server,
@@ -392,5 +394,125 @@ async fn r11_without_viewers_steps_are_not_held() {
 
     player.submit(state(1), vec![stay(agent)]).await;
 
+    assert_eq!(player.observations().await, (state(2), vec![agent]));
+}
+
+fn interval(ms: u64) -> PacingMode {
+    PacingMode::Interval {
+        ms: IntervalMs::new(ms).unwrap(),
+    }
+}
+
+#[tokio::test]
+async fn r12_the_first_viewer_resets_pacing_to_the_default_interval() {
+    let address = start_server(ServerConfig {
+        step_interval: Duration::from_millis(250),
+        ..ServerConfig::default()
+    })
+    .await;
+    let (mut creator, run_id) = Client::with_new_run(address).await;
+    let mut first = Client::joined(address, &run_id).await;
+    first.watch_and_control().await;
+    first.set_pacing(PacingMode::Unlimited).await;
+
+    // The last viewer leaves, and pacing becomes unlimited until another viewer arrives.
+    first.close().await;
+    tokio::time::sleep(SETTLE).await;
+    let (_, pacing) = creator.watch_with_pacing().await;
+
+    assert_eq!(pacing.mode, interval(250));
+    assert!(!pacing.you_control);
+}
+
+#[tokio::test]
+async fn r13_control_passes_to_the_oldest_remaining_viewer() {
+    let address = start_default_server().await;
+    let (mut controller, run_id) = Client::with_new_run(address).await;
+    // `older` connects before `newer`, but watches after it.
+    let mut older = Client::joined(address, &run_id).await;
+    let mut newer = Client::joined(address, &run_id).await;
+    controller.watch_and_control().await;
+    newer.watch().await;
+    older.watch().await;
+    controller.set_pacing(PacingMode::Paused).await;
+    older.pacing_update().await;
+    newer.pacing_update().await;
+
+    controller.close().await;
+
+    let pacing = older.pacing_update().await;
+    assert_eq!(
+        pacing,
+        Pacing {
+            mode: PacingMode::Paused,
+            you_control: true
+        }
+    );
+    let pacing = newer.pacing_update().await;
+    assert!(!pacing.you_control);
+    expect_code(newer.claim_pacing().await, ErrorCode::PacingControlHeld);
+}
+
+#[tokio::test]
+async fn r14_a_paused_run_steps_only_when_a_step_is_granted() {
+    let address = start_default_server().await;
+    let (mut viewer, run_id) = Client::with_new_run(address).await;
+    let mut player = Client::joined(address, &run_id).await;
+    viewer.watch_and_control().await;
+    let agent = expect_spawned(player.spawn(Placement::Random).await);
+    // Pausing during setup carries through Start.
+    viewer.set_pacing(PacingMode::Paused).await;
+    viewer.start().await;
+    assert_eq!(player.observations().await, (state(0), vec![agent]));
+
+    player.submit(state(0), vec![stay(agent)]).await;
+    player.expect_silence(SETTLE).await;
+
+    viewer.step_once().await;
+    assert_eq!(player.observations().await, (state(1), vec![agent]));
+
+    // The run stays paused after the granted step.
+    player.submit(state(1), vec![stay(agent)]).await;
+    player.expect_silence(SETTLE).await;
+
+    viewer.set_pacing(PacingMode::Unlimited).await;
+    assert_eq!(player.observations().await, (state(2), vec![agent]));
+}
+
+#[tokio::test]
+async fn r14_granted_steps_do_not_accumulate() {
+    let address = start_default_server().await;
+    let (mut viewer, run_id) = Client::with_new_run(address).await;
+    let mut player = Client::joined(address, &run_id).await;
+    viewer.watch_and_control().await;
+    let agent = expect_spawned(player.spawn(Placement::Random).await);
+    viewer.set_pacing(PacingMode::Paused).await;
+    viewer.start().await;
+    player.observations().await;
+
+    // Two grants before the agent is ready allow only one step.
+    viewer.step_once().await;
+    viewer.step_once().await;
+    player.submit(state(0), vec![stay(agent)]).await;
+    assert_eq!(player.observations().await, (state(1), vec![agent]));
+
+    player.submit(state(1), vec![stay(agent)]).await;
+    player.expect_silence(SETTLE).await;
+}
+
+#[tokio::test]
+async fn r14_an_interval_change_applies_to_a_held_step() {
+    let address = start_default_server().await;
+    let (mut player, run_id) = Client::with_new_run(address).await;
+    let mut viewer = Client::joined(address, &run_id).await;
+    viewer.watch_and_control().await;
+    viewer.set_pacing(interval(3_600_000)).await;
+    let agent = first_step(&mut player).await;
+
+    player.submit(state(1), vec![stay(agent)]).await;
+    player.expect_silence(SETTLE).await;
+
+    // The previous step started long enough ago for the new interval.
+    viewer.set_pacing(interval(1)).await;
     assert_eq!(player.observations().await, (state(2), vec![agent]));
 }

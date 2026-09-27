@@ -22,8 +22,12 @@ struct Args {
     /// Seconds a run survives with no sessions before it is released.
     #[arg(long, default_value_t = ServerConfig::DEFAULT_RUN_RELEASE.as_secs())]
     run_release_secs: u64,
-    /// Minimum milliseconds between step starts while a run has a connected viewer.
-    #[arg(long, default_value_t = ServerConfig::DEFAULT_STEP_INTERVAL.as_millis() as u64)]
+    /// Milliseconds between step starts when a run's first viewer arrives (1 to 3600000).
+    #[arg(
+        long,
+        default_value_t = ServerConfig::DEFAULT_STEP_INTERVAL.as_millis() as u64,
+        value_parser = clap::value_parser!(u64).range(1..=3_600_000),
+    )]
     step_interval_ms: u64,
 }
 

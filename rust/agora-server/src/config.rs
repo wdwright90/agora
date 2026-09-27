@@ -3,14 +3,15 @@
 use std::time::Duration;
 
 /// Timeouts that govern session and run lifetimes (SPEC-003-R06, R07), and the step interval
-/// used while viewers are watching (SPEC-003-R11).
+/// a run's first viewer starts with (SPEC-003-R11).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ServerConfig {
     /// How long a session survives without a connection before it expires.
     pub session_expiry: Duration,
     /// How long a run survives with no sessions before it is released.
     pub run_release: Duration,
-    /// The minimum time between step starts while a run has a connected viewer.
+    /// The pacing interval a run starts with when its first viewer arrives: the minimum time
+    /// between step starts. Values outside 1 ms to one hour are clamped into that range.
     pub step_interval: Duration,
 }
 

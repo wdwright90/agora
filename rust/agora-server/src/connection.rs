@@ -15,6 +15,7 @@ use tracing::{debug, info};
 
 use crate::catalog;
 use crate::config::ServerConfig;
+use crate::pacing::PacingRejection;
 use crate::registry::Registry;
 use crate::requests::{Admission, RequestLog};
 use crate::run::{
@@ -23,7 +24,8 @@ use crate::run::{
 use crate::wire;
 
 /// Serve one TCP connection until the client disconnects.
-pub async fn serve(stream: TcpStream, registry: Registry, config: ServerConfig) {
+/// `number` is the connection's position in acceptance order.
+pub async fn serve(stream: TcpStream, number: u64, registry: Registry, config: ServerConfig) {
     let mut socket = match tokio_tungstenite::accept_async(stream).await {
         Ok(socket) => socket,
         Err(e) => {
@@ -39,6 +41,7 @@ pub async fn serve(stream: TcpStream, registry: Registry, config: ServerConfig) 
         config,
         outbox,
         view_slot,
+        number,
         handshake_done: false,
         session: None,
     };
@@ -90,6 +93,8 @@ struct Connection {
     outbox: Outbox,
     /// Given to the run on `watch`, for the views it publishes to this connection.
     view_slot: ViewSlot,
+    /// This connection's position in acceptance order.
+    number: u64,
     handshake_done: bool,
     session: Option<SessionLink>,
 }
@@ -100,6 +105,7 @@ struct SessionLink {
     run_id: RunId,
     run: RunHandle,
     view_slot: ViewSlot,
+    connection: u64,
     requests: RequestLog,
 }
 
@@ -253,6 +259,7 @@ impl Connection {
             run_id,
             run,
             view_slot: self.view_slot.clone(),
+            connection: self.number,
             requests: RequestLog::new(id, request, response.clone()),
         });
         response
@@ -311,12 +318,30 @@ impl SessionLink {
             }
             ClientMessage::Watch { .. } => self
                 .run
-                .watch(self.id.clone(), self.view_slot.clone())
+                .watch(self.id.clone(), self.connection, self.view_slot.clone())
                 .await
-                .map(|view| ServerMessage::Watching {
+                .map(|(view, pacing)| ServerMessage::Watching {
                     request_id: id,
                     view,
+                    pacing,
                 }),
+            ClientMessage::ClaimPacing { .. } => {
+                self.run.claim_pacing(self.id.clone()).await.map(|result| {
+                    pacing_response(id, result, ServerMessage::PacingClaimed { request_id: id })
+                })
+            }
+            ClientMessage::SetPacing { mode, .. } => self
+                .run
+                .set_pacing(self.id.clone(), *mode)
+                .await
+                .map(|result| {
+                    pacing_response(id, result, ServerMessage::PacingSet { request_id: id })
+                }),
+            ClientMessage::StepOnce { .. } => {
+                self.run.step_once(self.id.clone()).await.map(|result| {
+                    pacing_response(id, result, ServerMessage::StepGranted { request_id: id })
+                })
+            }
             ClientMessage::Hello { .. } => unreachable!("hello is not a request"),
         };
         // A run is not released while it has a connected session, so this is not expected.
@@ -408,6 +433,35 @@ fn entry_result((agent, result): (agora_sim::AgentId, Result<(), EntryRejection>
         agent_id: AgentId::new(agent.0).expect("agent IDs stay below 2^53"),
         error,
     }
+}
+
+fn pacing_response(
+    id: RequestId,
+    result: Result<(), PacingRejection>,
+    success: ServerMessage,
+) -> ServerMessage {
+    let Err(rejection) = result else {
+        return success;
+    };
+    let (code, message) = match rejection {
+        PacingRejection::NotViewing => (
+            ErrorCode::NotViewing,
+            "only a viewer can claim pacing control; send watch first",
+        ),
+        PacingRejection::ControlHeld => (
+            ErrorCode::PacingControlHeld,
+            "another viewer holds pacing control",
+        ),
+        PacingRejection::NotController => (
+            ErrorCode::NotPacingController,
+            "this session does not hold pacing control",
+        ),
+        PacingRejection::NotPaused => (
+            ErrorCode::RunNotPaused,
+            "a single step can only be granted while paused",
+        ),
+    };
+    ServerMessage::Error(wire::error(Some(id), code, message))
 }
 
 fn spawn_error(id: RequestId, error: SpawnError) -> ErrorResponse {
