@@ -1,10 +1,10 @@
 # Handoff
 
-Checkpoint: 2026-09-27, ADR-002 (simulation inspection and debug visualization) on branch `docs/inspection-adr`, a documentation PR ahead of the viewer. PR 1 (`agora-sim` core) merged as #3, PR 2 (client protocol) as #4, PR 3 (`agora-server` part 1) as #5, PR 4a (steps and observations) as #7, PR 4b (viewers) as #8, PR 4c (pacing) as #9, and PR 5 (`agora-client`) as #10.
+Checkpoint: 2026-09-27, ADR-002 (simulation inspection and debug visualization) open as #12 on branch `docs/inspection-adr`, a documentation PR ahead of the viewer. PR 1 (`agora-sim` core) merged as #3, PR 2 (client protocol) as #4, PR 3 (`agora-server` part 1) as #5, PR 4a (steps and observations) as #7, PR 4b (viewers) as #8, PR 4c (pacing) as #9, and PR 5 (`agora-client`) as #10.
 
 ## Resume here
 
-Check the ADR-002 PR's review comments with `gh pr view <number> --comments` and the inline comments through the GitHub API, and agree any changes before making them.
+Check the ADR-002 PR's review comments with `gh pr view 12 --comments` and the inline comments through the GitHub API, and agree any changes before making them.
 
 Once it has merged, build PR 6 (`agora-viewer`) with a new viewer CDD (CDD-004) and spec (SPEC-005), following the viewer decisions below. The maintainer has agreed the design; no further scope discussion is needed unless something unclear comes up.
 
