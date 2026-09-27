@@ -1,0 +1,20 @@
+[package]
+name = "agora-server"
+version = "0.1.0"
+description = "Agora host application: client connections, run management, and routing."
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+agora-protocol.workspace = true
+agora-sim.workspace = true
+clap.workspace = true
+futures-util.workspace = true
+rand.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

@@ -1,6 +1,6 @@
 # Handoff
 
-Discovery and the draft package proposal are complete for maintainer review. No Rust packages exist. The [SADD](../../docs/architecture/sadd.md#proposed-rust-package-mapping) owns the proposal; [ADR-001](../../docs/decisions/0001-rust-package-boundaries.md) explains the tradeoffs. POC structural findings and revision are in [context](context.md).
+Discovery and the draft package proposal are complete for maintainer review. No Rust packages exist. The [SADD](../../docs/architecture/sadd.md#rust-package-mapping) owns the proposal; [ADR-001](../../docs/decisions/0001-rust-package-boundaries.md) explains the tradeoffs. POC structural findings and revision are in [context](context.md).
 
 Discovery captured in the SADD: local-first development with machine-independent client access; future authenticated access for friends; client-requested environments and one or more agents; recorded training runs and automatic closure when unused; configuration and programmatic environment authoring; visual editor as stretch goal; visualizer-led local agent inspection. Parallel environments remain outside the first milestone and retain their earlier stretch-goal classification pending prioritization.
 

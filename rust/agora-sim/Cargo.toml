@@ -1,0 +1,13 @@
+[package]
+name = "agora-sim"
+version = "0.1.0"
+description = "Headless Agora simulation: world state, action collection, and step execution."
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+bevy_ecs.workspace = true
+rand.workspace = true
+rand_chacha.workspace = true
+thiserror.workspace = true

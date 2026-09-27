@@ -1,0 +1,1 @@
+{ "type": "error", "request_id": 2, "code": "cell_occupied", "message": "cell (0, 9) is occupied", "details": { "x": 0, "y": 9 } }
