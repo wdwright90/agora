@@ -50,6 +50,7 @@ Session recovery will let a client reattach a connection to its session before e
 
 ## Design constraints and rationale
 
+- **Mapping between protocol and simulation types.** The server converts between `agora-protocol` and `agora-sim` types, so wire concerns stay out of simulation code, as the [package mapping](../../architecture/sadd.md#rust-package-mapping) requires. The mapping is intended, not temporary. The identifier conversions and error-code mappings stay, because clients' error codes are the server's decision. The hand-written action conversion is expected to be replaced by a generic path when capability definitions arrive, which will decode an action's parameters into a simulation action (raised in review of PR #7, 2026-09-26).
 - **One task per run.** This gives each run its own world and execution schedule, as the SADD requires, without locks around the simulation. It leaves room for pacing and parallel runs later.
 - **Release after sessions, not agents.** The SADD's release rule is "neither client-controlled agents nor observers". Tying release to sessions instead means a connected session keeps its run alive even before it spawns anything, such as a coordinator setting up. A disconnected session keeps the run until the session expires. The maintainer chose this model on 2026-09-25, and the SADD rule is updated to match.
 - **Advance on readiness, not on a timer.** Until pacing exists, the run checks readiness after each submission and each expiry, which are the only events that can make it ready. Pacing will add a gate before the advance.
