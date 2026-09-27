@@ -13,5 +13,8 @@ pub use ids::{
     AgentId, CatalogEntryId, EmptyId, MAX_SAFE_INTEGER, OutOfRange, RequestId, RunId, SessionId,
     StateId,
 };
-pub use message::{ClientMessage, Placement, RunPhase, ServerMessage};
+pub use message::{
+    Action, ActionEntry, AgentObservation, ClientMessage, Direction, EntryError, EntryResult,
+    Observation, Placement, RunPhase, ServerMessage,
+};
 pub use version::{InvalidVersion, PROTOCOL_VERSION, ProtocolVersion};

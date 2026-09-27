@@ -82,6 +82,16 @@ error_codes! {
     CellOccupied => "cell_occupied",
     /// Random placement found no unoccupied cell.
     NoFreeCell => "no_free_cell",
+    /// The operation is only available after Start.
+    RunNotStarted => "run_not_started",
+    /// A submission targets a state other than the run's current state.
+    WrongState => "wrong_state",
+    /// An action entry names an agent this session does not own.
+    AgentNotOwned => "agent_not_owned",
+    /// The agent already has an accepted action for this state.
+    AlreadySubmitted => "already_submitted",
+    /// The move distance exceeds the agent's movement budget.
+    DistanceBudgetExceeded => "agent_limit.distance_budget_exceeded",
 }
 
 impl fmt::Display for ErrorCode {

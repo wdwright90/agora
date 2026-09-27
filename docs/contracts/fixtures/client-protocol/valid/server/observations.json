@@ -1,0 +1,1 @@
+{ "type": "observations", "state_id": 1, "observations": [{ "agent_id": 1, "observation": {} }, { "agent_id": 2, "observation": {} }] }

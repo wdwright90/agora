@@ -4,12 +4,13 @@
 mod common;
 
 use agora_protocol::{
-    AgentId, ClientMessage, ErrorCode, PROTOCOL_VERSION, Placement, ProtocolVersion, RunId,
-    RunPhase, ServerMessage, StateId,
+    AgentId, ClientMessage, Direction, ErrorCode, PROTOCOL_VERSION, Placement, ProtocolVersion,
+    RunId, RunPhase, ServerMessage, StateId,
 };
 use agora_server::RETAINED_RESULTS;
 use common::{
-    Client, cell, empty_grid, expect_code, expect_error, request_id, start_default_server,
+    Client, cell, empty_grid, expect_code, expect_error, expect_spawned, expect_submitted,
+    request_id, start_default_server, state, stay, step,
 };
 use serde_json::json;
 
@@ -100,7 +101,7 @@ async fn r04_r06_an_unsupported_version_is_rejected_and_the_connection_closed() 
 
     let reply = client
         .exchange(&ClientMessage::Hello {
-            protocol_version: ProtocolVersion::new(0, 2, 0),
+            protocol_version: ProtocolVersion::new(0, 1, 0),
         })
         .await;
 
@@ -109,7 +110,7 @@ async fn r04_r06_an_unsupported_version_is_rejected_and_the_connection_closed() 
     let details = serde_json::Value::Object(error.details.unwrap());
     assert_eq!(
         details,
-        json!({ "requested": "0.2.0", "supported": [PROTOCOL_VERSION.to_string()] })
+        json!({ "requested": "0.1.0", "supported": [PROTOCOL_VERSION.to_string()] })
     );
     client.expect_closed().await;
 }
@@ -504,4 +505,114 @@ async fn r09_errors_carry_a_message_for_people() {
     let error = expect_error(client.start().await);
 
     assert!(!error.message.is_empty());
+}
+
+#[tokio::test]
+async fn r10_submitted_reports_each_entry_in_order() {
+    let address = start_default_server().await;
+    let (mut client, _) = Client::with_new_run(address).await;
+    let first = expect_spawned(client.spawn(cell(0, 0)).await);
+    let second = expect_spawned(client.spawn(cell(5, 5)).await);
+    client.start().await;
+    let unknown = agent(99);
+
+    let reply = client
+        .submit(
+            state(0),
+            vec![
+                step(first, Direction::North, 2),
+                stay(second),
+                step(first, Direction::North, 1),
+                stay(first),
+                stay(unknown),
+            ],
+        )
+        .await;
+
+    let ServerMessage::Submitted {
+        state_id, results, ..
+    } = reply
+    else {
+        panic!("expected submitted, got {reply:?}");
+    };
+    assert_eq!(state_id, state(0));
+    let summary: Vec<_> = results
+        .iter()
+        .map(|r| (r.agent_id, r.error.as_ref().map(|e| e.code.clone())))
+        .collect();
+    assert_eq!(
+        summary,
+        [
+            (first, Some(ErrorCode::DistanceBudgetExceeded)),
+            (second, None),
+            (first, None),
+            (first, Some(ErrorCode::AlreadySubmitted)),
+            (unknown, Some(ErrorCode::AgentNotOwned)),
+        ]
+    );
+    let details = serde_json::Value::Object(results[0].error.clone().unwrap().details.unwrap());
+    assert_eq!(details, json!({ "distance": 2, "budget": 1 }));
+}
+
+#[tokio::test]
+async fn r10_submitting_before_start_is_rejected() {
+    let address = start_default_server().await;
+    let (mut client, _) = Client::with_new_run(address).await;
+    let first = expect_spawned(client.spawn(Placement::Random).await);
+
+    expect_code(
+        client.submit(state(0), vec![stay(first)]).await,
+        ErrorCode::RunNotStarted,
+    );
+}
+
+#[tokio::test]
+async fn r10_submitting_for_another_state_is_rejected() {
+    let address = start_default_server().await;
+    let (mut client, _) = Client::with_new_run(address).await;
+    let first = expect_spawned(client.spawn(Placement::Random).await);
+    client.start().await;
+
+    let error = expect_code(
+        client.submit(state(1), vec![stay(first)]).await,
+        ErrorCode::WrongState,
+    );
+
+    let details = serde_json::Value::Object(error.details.unwrap());
+    assert_eq!(details, json!({ "expected": 0, "supplied": 1 }));
+    // The rejected submission did not fill the agent's slot.
+    let results = expect_submitted(client.submit(state(0), vec![stay(first)]).await);
+    assert_eq!(results[0].error, None);
+}
+
+#[tokio::test]
+async fn r11_observations_follow_the_response_that_caused_them() {
+    let address = start_default_server().await;
+    let (mut client, _) = Client::with_new_run(address).await;
+    let first = expect_spawned(client.spawn(Placement::Random).await);
+    let second = expect_spawned(client.spawn(Placement::Random).await);
+
+    let request_id = client.next_id();
+    client.send(&ClientMessage::Start { request_id }).await;
+    assert_eq!(
+        client.receive_raw().await,
+        ServerMessage::Started { request_id }
+    );
+    assert_eq!(client.observations().await, (state(0), vec![first, second]));
+
+    client.submit(state(0), vec![stay(second)]).await;
+    let request_id = client.next_id();
+    client
+        .send(&ClientMessage::Submit {
+            request_id,
+            state_id: state(0),
+            actions: vec![stay(first)],
+        })
+        .await;
+    let reply = client.receive_raw().await;
+    assert!(
+        matches!(reply, ServerMessage::Submitted { .. }),
+        "{reply:?}"
+    );
+    assert_eq!(client.observations().await, (state(1), vec![first, second]));
 }

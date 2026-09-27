@@ -19,16 +19,16 @@ This spec defines the observable behavior of the [simulation component](../cdd.m
 - readiness
 - advancing a step with MVP move actions
 - viewer state
+- immediate agent removal, used for session-expiry cleanup
 
 It is extended feature by feature. Each change updates these requirements together with the implementation and its tests.
 
 The CDD and [SADD](../../../architecture/sadd.md) define further behavior that is not yet covered here and is not implemented:
 
-- spawning or removing agents after Start, including queued membership changes and admission into a started empty run
+- spawning agents after Start, and client-requested removal, including queued membership changes and admission into a started empty run
 - batch submission
 - observation suppression and restoration
 - clearing a pending action on reconnection
-- session-expiry cleanup
 - live edits
 
 Server responsibilities are out of scope: connections, authority, pacing, deadlines, request correlation, and wire formats. Wire representations belong to shared contracts.
@@ -95,13 +95,17 @@ Server responsibilities are out of scope: connections, authority, pacing, deadli
 
 - **SPEC-001-R16:** In any phase, the viewer state returns the current state ID, the grid dimensions, and every agent's ID and position in ascending ID order. It is separate from agent observations.
 
+### Removal
+
+- **SPEC-001-R18:** Removing an agent takes effect immediately, in any phase. It frees the agent's cell and discards any accepted action for it. It executes no step, leaves the state ID unchanged, and produces no observation. Removed agents' IDs are not reused. Removing an agent that does not exist returns an unknown-agent error. After removal, readiness no longer waits for the agent, and a started run whose last agent is removed is started-empty. This is the server-driven session-expiry cleanup: the server removes an expired session's agents promptly, as the SADD's [session-expiry rule](../../../architecture/sadd.md#simulation-step-coordination) requires. Operations are synchronous, so no step is ever executing when it is called. Client-requested removal, which waits for the post-action boundary, is a separate operation that is not built yet.
+
 ### Reproducibility
 
 - **SPEC-001-R17:** Within the same build and platform, two simulations with the same configuration, including the seed, that receive the same ordered sequence of operations produce identical results and viewer states. Each run has its own random streams, derived from its seed with ChaCha8: stream 0 is reserved for environment generation, stream 1 is for spawning, and stream 2 is for shuffling execution order. Drawing from one stream does not affect another.
 
 ## Interfaces and data
 
-The Rust API is `agora_sim::Simulation`. Operation names map to `new`, `spawn`, `start`, `submit`, `readiness`, `advance`, `view`, and `agent_count`. Error variants correspond to the error names above. These are internal package interfaces, not wire contracts.
+The Rust API is `agora_sim::Simulation`. Operation names map to `new`, `spawn`, `start`, `submit`, `readiness`, `advance`, `view`, `remove`, and `agent_count`. Error variants correspond to the error names above. These are internal package interfaces, not wire contracts.
 
 ## Acceptance criteria and verification
 
@@ -124,8 +128,9 @@ Tests are in `rust/agora-sim/tests/lifecycle_and_movement.rs`. Each test name st
 | R15 | The state ID increments, observations carry N+1, and actions clear. | `r15_*` |
 | R16 | View contents in setup and after steps. | `r16_*` |
 | R17 | Identical seeds and inputs give identical histories; different seeds can differ. | `r17_*` |
+| R18 | Removal frees the cell without changing the state or reusing the ID; unknown agents fail; a removed agent's action is discarded; removing the only missing agent makes the run ready; removing every agent leaves it started-empty. | `r18_*` |
 
 ## Open questions
 
-- Post-Start membership, removal, suppression, reconnection reset, and batch submission. See the CDD's open questions.
+- Post-Start spawning, client-requested removal, suppression, reconnection reset, and batch submission. See the CDD's open questions. The server submits batch entries one at a time, as the CDD permits.
 - Sharing types with `agora-protocol` is deferred. For the MVP the simulation keeps its own types, and the server maps them.
