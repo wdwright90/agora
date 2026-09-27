@@ -250,7 +250,8 @@ pub fn create(
         seed,
     })
     .expect("catalog entries have valid grid dimensions");
-    let span = info_span!("run", %id);
+    // The run outlives the connection that created it, so its span has no parent.
+    let span = info_span!(parent: None, "run", %id);
     info!(parent: &span, %catalog_entry, seed, "run created");
 
     let mut run = Run {

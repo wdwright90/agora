@@ -1,12 +1,12 @@
 # Handoff
 
-Checkpoint: 2026-09-27, PR 4c (`agora-server` pacing) open as #9 on branch `feature/server-pacing`. PR 1 (`agora-sim` core) merged as #3, PR 2 (client protocol) as #4, PR 3 (`agora-server` part 1) as #5, PR 4a (steps and observations) as #7, and PR 4b (viewers) as #8. With 4c, the server side of the milestone is complete.
+Checkpoint: 2026-09-27, PR 5 (`agora-client`) on branch `feature/client`. PR 1 (`agora-sim` core) merged as #3, PR 2 (client protocol) as #4, PR 3 (`agora-server` part 1) as #5, PR 4a (steps and observations) as #7, PR 4b (viewers) as #8, and PR 4c (pacing) as #9. The server side of the milestone is complete.
 
 ## Resume here
 
-Check PR 4c's review comments with `gh pr view 9 --comments` and the inline comments through the GitHub API. Answer questions, and agree any changes before making them on `feature/server-pacing`.
+Check PR 5's review comments with `gh pr view <number> --comments` and the inline comments through the GitHub API. Answer questions, and agree any changes before making them on `feature/client`.
 
-Once 4c has merged, agree the scope of PR 5 (`agora-client`: the Rust client library and a random-mover demo client) with the maintainer before implementing it. The viewer (PR 6) needs a viewer CDD first; the maintainer asked on #8 how views will be drawn, and the answer sketched Bevy sprites synced from complete views, a background network task, and interpolation between steps.
+Once PR 5 has merged, the last step is PR 6 (`agora-viewer`). It needs a viewer CDD first, agreed with the maintainer before implementing; the maintainer asked on #8 how views will be drawn, and the answer sketched Bevy sprites synced from complete views, a background network task, and interpolation between steps.
 
 ## Decisions
 
@@ -48,13 +48,32 @@ Once 4c has merged, agree the scope of PR 5 (`agora-client`: the Rust client lib
     - `watching` carries a `pacing {mode, you_control}` state, and `pacing_update` pushes it to every viewer on any mode or controller change.
     - `step_once` is answered with `step_granted` at once; the viewer waits for the `view_update`.
     - Intervals range from 1 ms to one hour; `unlimited` is a separate mode.
-  - Choices made in 4c, open to review:
+  - Choices made in 4c, accepted without notes when #9 merged:
     - Protocol 0.4.0. Modes are tagged by `kind`: `paused`, `unlimited`, and `interval` with `ms`.
     - The first viewer resets the mode to the default interval with no controller; the last viewer leaving makes the run unlimited. Claiming control you already hold succeeds.
     - Grants do not accumulate, and any mode change cancels an unused grant.
     - A new interval is measured from the previous step's start.
     - Connections are numbered in acceptance order to pick the handover successor.
     - The pacing state machine lives in `agora-server/src/pacing.rs`.
+- **PR 5** (agreed 2026-09-27):
+  - The client library is async on tokio. Observations arrive through a stream; views and pacing are latest-value handles (Tokio `watch` receivers).
+  - The demo has `create [--start-at M] [--unlimited]` and `join <RUN_ID>`, spawns `--agents` agents, and moves them at random until `--steps` or Ctrl-C.
+  - The client gets its own CDD (CDD-003) and spec (SPEC-004).
+  - The maintainer decided not to guard against or document clients reading views to "cheat": Agora is for training, and cheating only defeats the client's own training.
+  - Settled in PR 5 review before opening (2026-09-27):
+    - `create_run` and `join_run` consume the `Client`, so a connection carries at most one session, as the protocol requires. The maintainer agreed: programs in several runs open several connections.
+    - `Session` is a cloneable handle, and the observation stream is a separate `Observations` value returned with it. The first draft kept the stream inside the session, so a session shared between tasks could not read observations; the maintainer asked for the fix in this PR.
+    - Request numbering and queueing happen under one lock, so concurrent tasks send in number order (a bug the first draft had, caught by a test).
+    - `ServerMessage::request_id()` was added to `agora-protocol`, without a wire change.
+    - The demo is behind a `demo` feature, on by default, at the maintainer's request.
+    - The server's run log span no longer nests under the connection that created the run; a manual run showed the joiner's events logged under the creator's connection.
+
+## PR 5 contents
+
+- `rust/agora-client`: the library (`Client`, `Session`, `Observations`, `SessionInfo`, `ObservationBatch`, and `ClientError`) and the `agora-demo` executable behind the default `demo` feature.
+- `agora-protocol`: `ServerMessage::request_id()`.
+- `agora-server`: the run's tracing span has no parent.
+- Docs: CDD-003 and SPEC-004 (new), the components index, the SADD package status, `rust/README.md` (package table and demo instructions), the work index, and this handoff.
 
 ## PR 4c contents
 
@@ -75,11 +94,11 @@ Once 4c has merged, agree the scope of PR 5 (`agora-client`: the Rust client lib
 In `rust/`:
 
 - `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo doc --no-deps --workspace` with `-D warnings`: all passed.
-- `cargo test --workspace`: 104 passed (35 in agora-sim, 12 in agora-protocol, and 57 in agora-server: 2 unit, 31 SPEC-002, and 24 SPEC-003).
-- The agora-server tests passed in 8 consecutive runs.
-- `agora-server --step-interval-ms 0` is rejected by the argument parser.
+- `cargo test --workspace`: 113 passed (35 in agora-sim, 12 in agora-protocol, 57 in agora-server, and 9 in agora-client: 8 library and 1 demo).
+- The agora-client and agora-server tests passed in 8 consecutive runs. `agora-client` also passes clippy and its tests with `--no-default-features`, and then has no demo dependencies. The R03 ordering test failed every time when out-of-order sending was reintroduced on purpose.
+- Manual run: `agora-server` with a `create --start-at 2` demo and a `join` demo, each with one agent. Both saw states 0 to 5 in step, the steps after the first were about 500 ms apart because the creator watches, both exited successfully, and the server returned to unlimited pacing when the viewer left. A second run confirmed the run's log lines are no longer under the creator's connection.
 
-The newest-only view rule is not tested directly; it follows from the channel type. No manual run against a live client was done; the demo client arrives in PR 5. No CI exists.
+The newest-only view rule is not tested directly; it follows from the channel type. No CI exists.
 
 ## Open follow-ups
 

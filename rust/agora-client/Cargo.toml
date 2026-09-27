@@ -1,0 +1,37 @@
+[package]
+name = "agora-client"
+version = "0.1.0"
+description = "Rust client library for Agora servers, and a random-mover demo client."
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[features]
+default = ["demo"]
+# The `agora-demo` executable. Library users can turn it off to skip its dependencies.
+demo = ["dep:clap", "dep:rand", "dep:tracing-subscriber"]
+
+[dependencies]
+agora-protocol.workspace = true
+clap = { workspace = true, optional = true }
+futures-util.workspace = true
+rand = { workspace = true, optional = true }
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+tracing.workspace = true
+tracing-subscriber = { workspace = true, optional = true }
+
+[dev-dependencies]
+agora-server.workspace = true
+tokio = { workspace = true, features = ["io-util", "process"] }
+
+[[bin]]
+name = "agora-demo"
+path = "src/bin/agora_demo.rs"
+required-features = ["demo"]
+
+[[test]]
+name = "demo"
+required-features = ["demo"]

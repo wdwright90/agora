@@ -15,3 +15,4 @@ Use the [CDD template](../templates/cdd.md) and [spec template](../templates/spe
 
 - [Simulation — CDD-001](simulation/cdd.md) (draft): step lifecycle, world state, actions, and perception boundaries; package `agora-sim`; specs: [SPEC-001](simulation/specs/lifecycle-and-movement.md) (draft).
 - [Server — CDD-002](server/cdd.md) (draft): connections, sessions, run hosting, and lifetimes; package `agora-server`; specs: [SPEC-003](server/specs/sessions-and-runs.md) (draft).
+- [Rust client — CDD-003](client/cdd.md) (draft): the client library and demo client; package `agora-client`; specs: [SPEC-004](client/specs/client-library.md) (draft).
