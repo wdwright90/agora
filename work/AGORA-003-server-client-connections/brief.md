@@ -1,6 +1,6 @@
 # AGORA-003 — Server and client connection management
 
-Status: active
+Status: complete
 Owner: maintainer
 
 ## Goal
@@ -16,6 +16,8 @@ Discuss logical sessions and physical connections, agent/creator/viewer authorit
 - Record agreed connection, authority, joining, recovery, and delivery behavior.
 - Identify unresolved MVP decisions and distinguish later work.
 - Capture server component responsibilities in a draft CDD when sufficiently developed, linked to canonical system rules and shared contracts.
+
+Met, and closed on 2026-09-27. The discussion produced the SADD's rules for runs, sessions, recovery, pacing, and delivery, and [AGORA-004](../AGORA-004-first-milestone/brief.md) built the MVP part as [CDD-002](../../docs/components/server/cdd.md), SPEC-002, SPEC-003, and `agora-server`. Session recovery, deadlines, and fallback control remain designed in the SADD but unbuilt, and are recorded in CDD-002's open questions and the AGORA-004 handoff. The [handoff](handoff.md) is a historical record; the SADD and CDDs are current.
 
 ## Dependencies and open questions
 
