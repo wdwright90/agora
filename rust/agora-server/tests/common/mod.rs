@@ -8,7 +8,8 @@ use std::time::Duration;
 
 use agora_protocol::{
     Action, ActionEntry, AgentId, CatalogEntryId, ClientMessage, Direction, EntryResult, ErrorCode,
-    ErrorResponse, PROTOCOL_VERSION, Placement, RequestId, RunId, ServerMessage, StateId, View,
+    ErrorResponse, PROTOCOL_VERSION, Pacing, PacingMode, Placement, RequestId, RunId,
+    ServerMessage, StateId, View,
 };
 use agora_server::{EMPTY_GRID_10X10, ServerConfig, serve};
 use futures_util::{SinkExt, StreamExt};
@@ -104,6 +105,8 @@ pub struct Client {
     observations: VecDeque<ServerMessage>,
     /// Pushed views not yet taken by [`Client::view_update`].
     views: VecDeque<View>,
+    /// Pushed pacing states not yet taken by [`Client::pacing_update`].
+    pacings: VecDeque<Pacing>,
 }
 
 impl Client {
@@ -115,6 +118,7 @@ impl Client {
             next_request: 1,
             observations: VecDeque::new(),
             views: VecDeque::new(),
+            pacings: VecDeque::new(),
         }
     }
 
@@ -178,6 +182,7 @@ impl Client {
         match self.receive_raw().await {
             message @ ServerMessage::Observations { .. } => self.observations.push_back(message),
             ServerMessage::ViewUpdate { view } => self.views.push_back(view),
+            ServerMessage::PacingUpdate { pacing } => self.pacings.push_back(pacing),
             message => return Some(message),
         }
         None
@@ -224,10 +229,23 @@ impl Client {
         }
     }
 
+    /// The next pushed pacing state.
+    pub async fn pacing_update(&mut self) -> Pacing {
+        loop {
+            if let Some(pacing) = self.pacings.pop_front() {
+                return pacing;
+            }
+            if let Some(message) = self.receive_or_set_aside().await {
+                panic!("expected a pacing update, got {message:?}");
+            }
+        }
+    }
+
     /// Require that no message arrives within `wait`.
     pub async fn expect_silence(&mut self, wait: Duration) {
         assert!(self.observations.is_empty(), "{:?}", self.observations);
         assert!(self.views.is_empty(), "{:?}", self.views);
+        assert!(self.pacings.is_empty(), "{:?}", self.pacings);
         if let Ok(frame) = tokio::time::timeout(wait, self.socket.next()).await {
             panic!("expected no message, got {frame:?}");
         }
@@ -300,11 +318,44 @@ impl Client {
 
     /// Watch the run, returning the view in the `watching` response.
     pub async fn watch(&mut self) -> View {
+        self.watch_with_pacing().await.0
+    }
+
+    /// Watch the run, returning the view and pacing state in the `watching` response.
+    pub async fn watch_with_pacing(&mut self) -> (View, Pacing) {
         let request_id = self.next_id();
         match self.exchange(&ClientMessage::Watch { request_id }).await {
-            ServerMessage::Watching { view, .. } => view,
+            ServerMessage::Watching { view, pacing, .. } => (view, pacing),
             other => panic!("expected watching, got {other:?}"),
         }
+    }
+
+    pub async fn claim_pacing(&mut self) -> ServerMessage {
+        let request_id = self.next_id();
+        self.exchange(&ClientMessage::ClaimPacing { request_id })
+            .await
+    }
+
+    pub async fn set_pacing(&mut self, mode: PacingMode) -> ServerMessage {
+        let request_id = self.next_id();
+        self.exchange(&ClientMessage::SetPacing { request_id, mode })
+            .await
+    }
+
+    pub async fn step_once(&mut self) -> ServerMessage {
+        let request_id = self.next_id();
+        self.exchange(&ClientMessage::StepOnce { request_id }).await
+    }
+
+    /// Watch, claim pacing control, and consume the resulting pacing update.
+    pub async fn watch_and_control(&mut self) {
+        self.watch().await;
+        let reply = self.claim_pacing().await;
+        assert!(
+            matches!(reply, ServerMessage::PacingClaimed { .. }),
+            "{reply:?}"
+        );
+        assert!(self.pacing_update().await.you_control);
     }
 
     pub async fn submit(&mut self, state_id: StateId, actions: Vec<ActionEntry>) -> ServerMessage {

@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{ErrorCode, ErrorResponse};
 use crate::ids::{AgentId, CatalogEntryId, RequestId, RunId, SessionId, StateId};
+use crate::pacing::{Pacing, PacingMode};
 use crate::version::ProtocolVersion;
 
 /// Messages sent by clients.
@@ -39,6 +40,15 @@ pub enum ClientMessage {
     },
     /// Become a viewer of the run until the connection closes.
     Watch { request_id: RequestId },
+    /// Take pacing control while no other viewer holds it. Viewers only.
+    ClaimPacing { request_id: RequestId },
+    /// Change the pacing mode. Pacing controller only.
+    SetPacing {
+        request_id: RequestId,
+        mode: PacingMode,
+    },
+    /// Allow one step while paused. Pacing controller only.
+    StepOnce { request_id: RequestId },
 }
 
 impl ClientMessage {
@@ -52,6 +62,9 @@ impl ClientMessage {
         "start",
         "submit",
         "watch",
+        "claim_pacing",
+        "set_pacing",
+        "step_once",
     ];
 
     /// The request ID, for every message except `hello`.
@@ -63,7 +76,10 @@ impl ClientMessage {
             | Self::Spawn { request_id, .. }
             | Self::Start { request_id }
             | Self::Submit { request_id, .. }
-            | Self::Watch { request_id } => Some(*request_id),
+            | Self::Watch { request_id }
+            | Self::ClaimPacing { request_id }
+            | Self::SetPacing { request_id, .. }
+            | Self::StepOnce { request_id } => Some(*request_id),
         }
     }
 }
@@ -110,10 +126,24 @@ pub enum ServerMessage {
         state_id: StateId,
         observations: Vec<AgentObservation>,
     },
-    /// Successful `watch`: the session is a viewer, and `view` is the run's current state.
-    Watching { request_id: RequestId, view: View },
+    /// Successful `watch`: the session is a viewer. `view` and `pacing` are the run's current
+    /// state.
+    Watching {
+        request_id: RequestId,
+        view: View,
+        pacing: Pacing,
+    },
     /// Pushed by the server, not a response: the run's newest state, for viewers.
     ViewUpdate { view: View },
+    /// Successful `claim_pacing`: this session holds pacing control.
+    PacingClaimed { request_id: RequestId },
+    /// Successful `set_pacing`: the new mode is in effect.
+    PacingSet { request_id: RequestId },
+    /// Successful `step_once`: one step may start once every agent is ready. The step's result
+    /// arrives as a `view_update`.
+    StepGranted { request_id: RequestId },
+    /// Pushed by the server, not a response: the pacing mode or controller changed, for viewers.
+    PacingUpdate { pacing: Pacing },
     /// Any failed request or rejected message.
     Error(ErrorResponse),
 }

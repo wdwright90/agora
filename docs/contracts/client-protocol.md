@@ -12,7 +12,7 @@ packages: [agora-protocol, agora-server, agora-client, agora-viewer]
 
 This contract is the canonical definition of the messages exchanged between the Agora server and its clients: the Rust client, the viewer, and later the Python client. It implements the SADD's [communication](../architecture/sadd.md#simulation-step-coordination), [error-response](../architecture/sadd.md#error-responses), and [run lifecycle](../architecture/sadd.md#run-lifecycle) rules.
 
-The contract grows feature by feature. Protocol version 0.3.0 currently covers:
+The contract grows feature by feature. Protocol version 0.4.0 currently covers:
 
 - message framing
 - the version handshake
@@ -21,8 +21,9 @@ The contract grows feature by feature. Protocol version 0.3.0 currently covers:
 - run setup: create, join, spawn, and Start
 - action submission and agent observations
 - watching a run's view
+- pacing controls
 
-Pacing controls, session recovery, and credentials are not yet defined. They are added as the features that use them are built. Version 0.2.0 added submission and observations, and 0.3.0 added watching.
+Session recovery and credentials are not yet defined. They are added as the features that use them are built. Version 0.2.0 added submission and observations, 0.3.0 added watching, and 0.4.0 added pacing.
 
 ## Terminology and preconditions
 
@@ -61,7 +62,7 @@ Pacing controls, session recovery, and credentials are not yet defined. They are
   - Backward-compatible additions increase the minor version.
   - Clarifications and fixes that don't change messages increase the patch version.
 
-  The current version is **0.3.0**. Protocol versions are independent of capability versions.
+  The current version is **0.4.0**. Protocol versions are independent of capability versions.
 - **SPEC-002-R06:** *(MVP.)* The server accepts only a client version exactly equal to its own. Semver-based backward compatibility is intended from 1.0.0 onward: the same major version, with the server's minor version at least the client's. Defining that rule will require a change to this spec.
 
 ### Requests and sessions
@@ -105,13 +106,27 @@ Pacing controls, session recovery, and credentials are not yet defined. They are
 
 ### Viewing
 
-- **SPEC-002-R12:** `watch {request_id}` makes the session a viewer until its connection closes. There is no request to stop watching. The response is `watching {request_id, view}`, where `view` is the run's current state. Watching again returns the current view and changes nothing else. Afterwards the server pushes `view_update {view}` when the view changes, after the response to any request that caused the change. A viewer may skip intermediate views, so each view is complete.
+- **SPEC-002-R12:** `watch {request_id}` makes the session a viewer until its connection closes. There is no request to stop watching. The response is `watching {request_id, view, pacing}`, where `view` and `pacing` ([R13](#pacing)) are the run's current state. Watching again returns the current state and changes nothing else. Afterwards the server pushes `view_update {view}` when the view changes, after the response to any request that caused the change. A viewer may skip intermediate views, so each view is complete.
 
   A view is `{state_id, phase, width, height, agents}`:
   - `phase` is `setup` or `started`, and `width` and `height` are the grid size in cells.
   - `agents` lists every agent in the run as `{agent_id, x, y}`, in ascending ID order, using the coordinates in R08.
 
   Views are separate from agent observations and are not limited to the session's own agents.
+
+### Pacing
+
+- **SPEC-002-R13:** Viewers control how fast a run steps. The server's rules are in [SPEC-003](../components/server/specs/sessions-and-runs.md#pacing).
+  - A pacing mode is `{"kind": "paused"}`, `{"kind": "unlimited"}`, or `{"kind": "interval", "ms"}`, where `ms` is an integer from 1 to 3,600,000 (one hour). Other values are malformed.
+  - A pacing state is `{mode, you_control}`, where `you_control` says whether the receiving session holds pacing control. It appears in `watching`, and the server pushes `pacing_update {pacing}` to every viewer when the mode or the controller changes, after the response to any request that caused the change.
+
+  | Request | Success response | Errors |
+  | --- | --- | --- |
+  | `claim_pacing {request_id}` | `pacing_claimed {request_id}` | `not_viewing`, `pacing_control_held` |
+  | `set_pacing {request_id, mode}` | `pacing_set {request_id}` | `not_pacing_controller` |
+  | `step_once {request_id}` | `step_granted {request_id}` | `not_pacing_controller`, `run_not_paused` |
+
+  `step_granted` confirms that one step may start; it does not wait for the step. The step's result arrives as a `view_update` once every agent is ready.
 
 ### Errors
 
@@ -147,6 +162,10 @@ Pacing controls, session recovery, and credentials are not yet defined. They are
   | `agent_not_owned` | *(Entry.)* The session does not own the agent | — |
   | `already_submitted` | *(Entry.)* The agent already has an accepted action for this state | — |
   | `agent_limit.distance_budget_exceeded` | *(Entry.)* Move distance over the movement budget | `distance`, `budget` |
+  | `not_viewing` | Operation requires the session to be a viewer | — |
+  | `pacing_control_held` | Another viewer holds pacing control | — |
+  | `not_pacing_controller` | Operation requires pacing control | — |
+  | `run_not_paused` | `step_once` while the run is not paused | — |
 
   Codes marked *(Entry)* appear in `submitted` results rather than in `error` messages. Codes for actions that exceed an agent's limits start with `agent_limit.`.
 
@@ -176,6 +195,7 @@ Rust tests are named by requirement ID. Message types are tested in `rust/agora-
 | R09 | Known codes map to their wire names, including the `agent_limit.` prefix, and unknown codes are preserved | `r09_*` |
 | R10 | An accepted entry has no `error` field | `r10_*` |
 | R12 | View fixtures round-trip; negative coordinates and a missing phase are rejected | `valid/`, `invalid/server/view_*` |
+| R13 | Pacing fixtures round-trip; intervals of 0 and over an hour, unknown modes, and `watching` without pacing are rejected | `valid/`, `invalid/client/set_pacing_*`, `invalid/server/watching_missing_pacing.json` |
 | R01 (server) | Unknown types report their type; invalid JSON, non-objects, missing fields, and binary frames are malformed, echoing any readable request ID | server `r01_*` |
 | R02 (server) | A request with an extra field succeeds | server `r02_*` |
 | R04, R06 (server) | `hello` gets `welcome`; an unsupported version is rejected and the connection closed; requests before `hello` and a second `hello` are rejected | server `r04_*` |
@@ -185,11 +205,12 @@ Rust tests are named by requirement ID. Message types are tested in `rust/agora-
 | R10 (server) | Entry results are in order with their codes and details; submitting before Start or for another state is rejected, and a rejected submission leaves the slot open | server `r10_*` |
 | R11 (server) | `started` precedes the state-0 observations; the step-completing `submitted` precedes the state-1 observations | server `r11_*` |
 | R12 (server) | `watching` carries the current view; a viewer receives a view after a spawn, Start, and a step, with the moved position | server `r12_*` |
+| R13 (server) | `watching` carries the default pacing state; each pacing request gets its response and the changes are pushed; each error code is returned | server `r13_*` |
 
 ## Open questions
 
 - **Retrying `create_run` or `join_run`:** if the response is lost, there is no session to retry against, so a retry creates another run or session. Deferred with session recovery and credentials.
-- Session recovery messages and credentials; pacing messages. These arrive with later features.
+- Session recovery messages and credentials. These arrive with a later feature.
 - Large environments may need partial or incremental views instead of complete ones (see the SADD's large-environment viewing scenario).
 - Pushes have no delivery guarantee across a lost connection. Session recovery will define how a client catches up.
 - **Action kinds:** each `kind` defines its own parameters, placed beside `kind`. Names that every kind may share later, such as `kind` and a capability `version`, are reserved and not used as parameters. An unknown `kind` currently makes the request malformed; once clients declare capabilities, a well-formed action the agent does not support should probably be rejected per entry instead. Parameter values may also depend on the environment, such as a hex grid's six directions. The fixed `direction` values stand in until capability definitions supply them per run (see the [simulation CDD](../components/simulation/cdd.md#open-questions)).

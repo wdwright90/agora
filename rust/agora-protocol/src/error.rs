@@ -92,6 +92,14 @@ error_codes! {
     AlreadySubmitted => "already_submitted",
     /// The move distance exceeds the agent's movement budget.
     DistanceBudgetExceeded => "agent_limit.distance_budget_exceeded",
+    /// The operation requires the session to be a viewer.
+    NotViewing => "not_viewing",
+    /// Another viewer holds pacing control.
+    PacingControlHeld => "pacing_control_held",
+    /// The operation requires pacing control.
+    NotPacingController => "not_pacing_controller",
+    /// `step_once` while the run is not paused.
+    RunNotPaused => "run_not_paused",
 }
 
 impl fmt::Display for ErrorCode {

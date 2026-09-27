@@ -6,6 +6,7 @@
 mod error;
 mod ids;
 mod message;
+mod pacing;
 mod version;
 
 pub use error::{ErrorCode, ErrorResponse};
@@ -17,4 +18,5 @@ pub use message::{
     Action, ActionEntry, AgentObservation, AgentView, ClientMessage, Direction, EntryError,
     EntryResult, Observation, Placement, RunPhase, ServerMessage, View,
 };
+pub use pacing::{IntervalMs, Pacing, PacingMode};
 pub use version::{InvalidVersion, PROTOCOL_VERSION, ProtocolVersion};

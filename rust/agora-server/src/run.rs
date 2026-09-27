@@ -1,15 +1,15 @@
 //! One run's task. It owns the run's simulation, its sessions, and their timers, and handles
 //! commands from connections one at a time, which serializes all calls into the simulation.
-//! It advances the simulation once every agent has an accepted action, waiting out the step
-//! interval while viewers are watching. It pushes each session its agents' observations, and
-//! each viewer the newest view.
+//! It advances the simulation once every agent has an accepted action and the pacing gate
+//! allows it. It pushes each session its agents' observations, and each viewer the newest view
+//! and any pacing change.
 
 use std::collections::HashMap;
 use std::future;
 
 use agora_protocol::{
-    AgentObservation, AgentView, CatalogEntryId, Observation, RunId, RunPhase, ServerMessage,
-    SessionId, StateId, View,
+    AgentObservation, AgentView, CatalogEntryId, IntervalMs, Observation, Pacing, PacingMode,
+    RunId, RunPhase, ServerMessage, SessionId, StateId, View,
 };
 use agora_sim::{
     AgentId, Move, Observations, Placement, SimConfig, Simulation, SpawnError, Status, Submission,
@@ -21,6 +21,7 @@ use tracing::{Instrument, debug, info, info_span};
 
 use crate::catalog::CatalogEntry;
 use crate::config::ServerConfig;
+use crate::pacing::{Gate, Pacer, PacingRejection};
 use crate::registry::Registry;
 
 /// Capacity of a run's command queue. Each connection waits for its reply before sending
@@ -100,8 +101,22 @@ enum Command {
     },
     Watch {
         session: SessionId,
+        connection: u64,
         slot: ViewSlot,
-        reply: oneshot::Sender<View>,
+        reply: oneshot::Sender<(View, Pacing)>,
+    },
+    ClaimPacing {
+        session: SessionId,
+        reply: oneshot::Sender<Result<(), PacingRejection>>,
+    },
+    SetPacing {
+        session: SessionId,
+        mode: PacingMode,
+        reply: oneshot::Sender<Result<(), PacingRejection>>,
+    },
+    StepOnce {
+        session: SessionId,
+        reply: oneshot::Sender<Result<(), PacingRejection>>,
     },
     Disconnect {
         session: SessionId,
@@ -149,14 +164,53 @@ impl RunHandle {
         .await
     }
 
-    /// Make `session` a viewer that receives views through `slot`. Returns the current view.
-    pub async fn watch(&self, session: SessionId, slot: ViewSlot) -> Result<View, RunGone> {
+    /// Make `session` a viewer that receives views through `slot`. `connection` orders viewers
+    /// by connection age for pacing handover. Returns the current view and pacing state.
+    pub async fn watch(
+        &self,
+        session: SessionId,
+        connection: u64,
+        slot: ViewSlot,
+    ) -> Result<(View, Pacing), RunGone> {
         self.call(|reply| Command::Watch {
             session,
+            connection,
             slot,
             reply,
         })
         .await
+    }
+
+    /// Claim pacing control for `session`.
+    pub async fn claim_pacing(
+        &self,
+        session: SessionId,
+    ) -> Result<Result<(), PacingRejection>, RunGone> {
+        self.call(|reply| Command::ClaimPacing { session, reply })
+            .await
+    }
+
+    /// Set the pacing mode on behalf of `session`.
+    pub async fn set_pacing(
+        &self,
+        session: SessionId,
+        mode: PacingMode,
+    ) -> Result<Result<(), PacingRejection>, RunGone> {
+        self.call(|reply| Command::SetPacing {
+            session,
+            mode,
+            reply,
+        })
+        .await
+    }
+
+    /// Allow one step while paused, on behalf of `session`.
+    pub async fn step_once(
+        &self,
+        session: SessionId,
+    ) -> Result<Result<(), PacingRejection>, RunGone> {
+        self.call(|reply| Command::StepOnce { session, reply })
+            .await
     }
 
     /// Report that `session` lost its connection.
@@ -205,7 +259,7 @@ pub fn create(
         sim,
         sessions: HashMap::new(),
         release_at: None,
-        last_step: None,
+        pacer: Pacer::new(default_interval(&config)),
         advance_at: None,
         registry: registry.clone(),
         config,
@@ -225,9 +279,8 @@ struct Run {
     sessions: HashMap<SessionId, Session>,
     /// When the run is released. Set only while the run has no sessions.
     release_at: Option<Instant>,
-    /// When the most recent step started.
-    last_step: Option<Instant>,
-    /// When a ready step may start. Set only while the step interval holds it back.
+    pacer: Pacer,
+    /// When a ready step may start. Set only while the pacing interval holds it back.
     advance_at: Option<Instant>,
     registry: Registry,
     config: ServerConfig,
@@ -239,10 +292,16 @@ struct Session {
     agents: Vec<AgentId>,
     /// Where to push this session's messages. `None` while it has no connection.
     outbox: Option<Outbox>,
-    /// Where to publish views, while the session is a connected viewer.
-    viewer: Option<ViewSlot>,
+    /// While the session is a connected viewer, where to publish views, and its connection's
+    /// acceptance order.
+    viewer: Option<Viewer>,
     /// When the session expires. Set only while it has no connection.
     expires_at: Option<Instant>,
+}
+
+struct Viewer {
+    slot: ViewSlot,
+    connection: u64,
 }
 
 impl Run {
@@ -304,23 +363,62 @@ impl Run {
             }
             Command::Watch {
                 session,
+                connection,
                 slot,
                 reply,
             } => {
-                if self.session_mut(&session).viewer.replace(slot).is_none() {
+                let first_viewer = !self.has_viewers();
+                let viewer = Viewer { slot, connection };
+                if self.session_mut(&session).viewer.replace(viewer).is_none() {
                     info!(%session, "session is watching");
                 }
-                let _ = reply.send(self.view());
+                if first_viewer {
+                    self.pacer.viewers_arrived();
+                    info!("first viewer arrived; pacing reset to the default interval");
+                }
+                let _ = reply.send((self.view(), self.pacer.state_for(&session)));
+            }
+            Command::ClaimPacing { session, reply } => {
+                let result = if self.session_mut(&session).viewer.is_none() {
+                    Err(PacingRejection::NotViewing)
+                } else {
+                    self.pacer.claim(&session)
+                };
+                let changed = matches!(result, Ok(true));
+                let _ = reply.send(result.map(|_| ()));
+                if changed {
+                    info!(%session, "pacing control claimed");
+                    self.push_pacing();
+                }
+            }
+            Command::SetPacing {
+                session,
+                mode,
+                reply,
+            } => {
+                let result = self.pacer.set(&session, mode);
+                let changed = result.is_ok();
+                let _ = reply.send(result);
+                if changed {
+                    info!(?mode, "pacing set");
+                    self.push_pacing();
+                    self.advance_if_ready(Instant::now());
+                }
+            }
+            Command::StepOnce { session, reply } => {
+                let _ = reply.send(self.pacer.step_once(&session));
+                self.advance_if_ready(Instant::now());
             }
             Command::Disconnect { session: id } => {
                 let expires_at = Instant::now() + self.config.session_expiry;
                 let session = self.session_mut(&id);
                 session.outbox = None;
-                session.viewer = None;
+                let was_viewer = session.viewer.take().is_some();
                 session.expires_at = Some(expires_at);
                 info!(session = %id, "session disconnected; expiry timer started");
-                // The last viewer leaving lifts the step interval.
-                self.advance_if_ready(Instant::now());
+                if was_viewer {
+                    self.viewer_left(&id);
+                }
             }
         }
     }
@@ -382,28 +480,56 @@ impl Run {
             .collect())
     }
 
-    /// Execute a step if every agent has an accepted action. While the run has a connected
-    /// viewer, a step starts no sooner than the step interval after the previous one, and
-    /// `advance_at` schedules it. Without viewers the run advances as fast as agents submit.
+    /// Execute a step if every agent has an accepted action and the pacing gate is open. When
+    /// the interval holds a ready step back, `advance_at` schedules it.
     fn advance_if_ready(&mut self, now: Instant) {
         self.advance_at = None;
         if !self.sim.readiness().is_ready() {
             return;
         }
-        if self.has_viewers()
-            && let Some(last) = self.last_step
-        {
-            let at = last + self.config.step_interval;
-            if at > now {
+        match self.pacer.gate(now) {
+            Gate::Open => {}
+            Gate::Until(at) => {
                 self.advance_at = Some(at);
                 return;
             }
+            Gate::Closed => return,
         }
-        self.last_step = Some(now);
+        self.pacer.step_started(now);
         let observations = self.sim.advance().expect("the run is ready to advance");
         debug!(state = observations.state.0, "step executed");
         self.deliver(&observations);
         self.publish_view();
+    }
+
+    /// A viewer stopped viewing: hand pacing control to the remaining viewer with the oldest
+    /// connection, or return to unlimited pacing when no viewers remain.
+    fn viewer_left(&mut self, session: &SessionId) {
+        let successor = self
+            .sessions
+            .iter()
+            .filter_map(|(id, s)| s.viewer.as_ref().map(|v| (v.connection, id)))
+            .min()
+            .map(|(_, id)| id.clone());
+        if successor.is_none() {
+            self.pacer.viewers_left();
+            info!("last viewer left; pacing is unlimited");
+        } else if self.pacer.viewer_left(session, successor.clone()) {
+            info!(controller = ?successor, "pacing control handed over");
+            self.push_pacing();
+        }
+        self.advance_if_ready(Instant::now());
+    }
+
+    /// Push each connected viewer the pacing state as it sees it.
+    fn push_pacing(&self) {
+        for (id, session) in &self.sessions {
+            if let (Some(_), Some(outbox)) = (&session.viewer, &session.outbox) {
+                let _ = outbox.send(ServerMessage::PacingUpdate {
+                    pacing: self.pacer.state_for(id),
+                });
+            }
+        }
     }
 
     fn has_viewers(&self) -> bool {
@@ -418,8 +544,8 @@ impl Run {
             return;
         }
         let view = self.view();
-        for slot in self.sessions.values().filter_map(|s| s.viewer.as_ref()) {
-            slot.send_replace(Some(view.clone()));
+        for viewer in self.sessions.values().filter_map(|s| s.viewer.as_ref()) {
+            viewer.slot.send_replace(Some(view.clone()));
         }
     }
 
@@ -497,7 +623,7 @@ impl Run {
     }
 
     /// Handle deadlines as of `now`: expire sessions, removing their agents; start a step the
-    /// interval held back; and start the release timer. Returns whether the run should be
+    /// pacing interval held back; and start the release timer. Returns whether the run should be
     /// released.
     fn on_deadline(&mut self, now: Instant) -> bool {
         let sim = &mut self.sim;
@@ -555,6 +681,12 @@ impl Run {
             Status::Collecting { .. } | Status::StartedEmpty => RunPhase::Started,
         }
     }
+}
+
+/// The configured step interval, within the range the protocol allows.
+fn default_interval(config: &ServerConfig) -> IntervalMs {
+    let ms = u64::try_from(config.step_interval.as_millis()).unwrap_or(u64::MAX);
+    IntervalMs::new(ms.clamp(IntervalMs::MIN, IntervalMs::MAX)).expect("clamped into range")
 }
 
 async fn sleep_until_some(deadline: Option<Instant>) {

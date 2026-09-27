@@ -4,8 +4,8 @@
 mod common;
 
 use agora_protocol::{
-    AgentId, AgentView, ClientMessage, Direction, ErrorCode, PROTOCOL_VERSION, Placement,
-    ProtocolVersion, RunId, RunPhase, ServerMessage, StateId, View,
+    AgentId, AgentView, ClientMessage, Direction, ErrorCode, IntervalMs, PROTOCOL_VERSION, Pacing,
+    PacingMode, Placement, ProtocolVersion, RunId, RunPhase, ServerMessage, StateId, View,
 };
 use agora_server::RETAINED_RESULTS;
 use common::{
@@ -670,4 +670,59 @@ async fn r12_viewers_receive_a_view_after_each_change() {
             y: 4
         }]
     );
+}
+
+#[tokio::test]
+async fn r13_pacing_requests_receive_their_responses_and_updates() {
+    let address = start_default_server().await;
+    let (mut viewer, _) = Client::with_new_run(address).await;
+
+    let (_, pacing) = viewer.watch_with_pacing().await;
+    assert_eq!(
+        pacing,
+        Pacing {
+            mode: PacingMode::Interval {
+                ms: IntervalMs::new(500).unwrap()
+            },
+            you_control: false
+        }
+    );
+
+    let reply = viewer.claim_pacing().await;
+    assert!(
+        matches!(reply, ServerMessage::PacingClaimed { .. }),
+        "{reply:?}"
+    );
+    assert!(viewer.pacing_update().await.you_control);
+
+    let reply = viewer.set_pacing(PacingMode::Paused).await;
+    assert!(
+        matches!(reply, ServerMessage::PacingSet { .. }),
+        "{reply:?}"
+    );
+    assert_eq!(viewer.pacing_update().await.mode, PacingMode::Paused);
+
+    let reply = viewer.step_once().await;
+    assert!(
+        matches!(reply, ServerMessage::StepGranted { .. }),
+        "{reply:?}"
+    );
+}
+
+#[tokio::test]
+async fn r13_pacing_requests_report_their_errors() {
+    let address = start_default_server().await;
+    let (mut first, run_id) = Client::with_new_run(address).await;
+    let mut second = Client::joined(address, &run_id).await;
+
+    expect_code(first.claim_pacing().await, ErrorCode::NotViewing);
+    first.watch_and_control().await;
+    second.watch().await;
+    expect_code(second.claim_pacing().await, ErrorCode::PacingControlHeld);
+    expect_code(
+        second.set_pacing(PacingMode::Unlimited).await,
+        ErrorCode::NotPacingController,
+    );
+    expect_code(second.step_once().await, ErrorCode::NotPacingController);
+    expect_code(first.step_once().await, ErrorCode::RunNotPaused);
 }
