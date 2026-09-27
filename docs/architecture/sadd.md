@@ -155,7 +155,7 @@ Clients own model training, including weight updates. The Python project provide
 
 ### Rust package mapping
 
-The maintainer accepted this package split in [ADR-001](../decisions/0001-rust-package-boundaries.md), which records the rationale. Packages are created as features need them; `agora-protocol`, `agora-sim`, `agora-server`, and `agora-client` exist, and the others are planned. Each logical component will receive a [CDD](../components/README.md) as its design is developed.
+The maintainer accepted this package split in [ADR-001](../decisions/0001-rust-package-boundaries.md), which records the rationale. Packages are created as features need them; `agora-protocol`, `agora-sim`, `agora-server`, `agora-client`, and `agora-viewer` exist, and `agora-recording` is planned. Each logical component will receive a [CDD](../components/README.md) as its design is developed.
 
 | Package | Responsibility | First milestone |
 | --- | --- | --- |
@@ -228,6 +228,16 @@ A seed alone does not reproduce a live run. Re-execution also requires the actua
 Simulation execution must support operation without visualization and allow observers to connect to an ongoing run. Agent internal state representations and observation transformers should accommodate additional options as the project matures; the initial supported set remains to be defined.
 
 To be defined: concrete reproducibility mechanisms, performance, compatibility, error handling, observability, and any security or deployment requirements relevant to the agreed scope.
+
+### Inspection and debug visualization
+
+Viewers receive three layers of data, as [ADR-002](../decisions/0002-inspection-and-debug-visualization.md) decides:
+
+- **Stable view:** world state for normal display, defined in the language-neutral client protocol and kept small. Recordings and non-Rust viewers rely on it.
+- **Debug channel:** opt-in and per selected entity, in a separate message family, versioned with the build (the server and viewer must come from the same code version). It carries reflected dumps of the entity's actual simulation components, debug-drawing primitives emitted by the systems that produced a result, and the observations agents actually received.
+- **Ownership:** each simulation component or system owns its stable view export, its reflection, and its debug drawing, beside its implementation. The viewer is generic for debugging and has custom rendering only for the stable view, so debug data cannot drift from the simulation.
+
+Simulation components derive `Reflect`; the first two gain it the next time the simulation changes. Sharing simulation component types with the viewer, through a data-only package used only by the debug layer, is deferred until a component needs a typed inspector or the generic view proves too weak to debug a behavior. The viewer never runs simulation systems. The debug channel's messages and controls are designed with the feature that builds them.
 
 ## Decisions and open questions
 
