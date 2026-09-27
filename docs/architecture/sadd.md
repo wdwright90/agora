@@ -229,6 +229,16 @@ Simulation execution must support operation without visualization and allow obse
 
 To be defined: concrete reproducibility mechanisms, performance, compatibility, error handling, observability, and any security or deployment requirements relevant to the agreed scope.
 
+### Inspection and debug visualization
+
+Viewers receive three layers of data, as [ADR-002](../decisions/0002-inspection-and-debug-visualization.md) decides:
+
+- **Stable view:** world state for normal display, defined in the language-neutral client protocol and kept small. Recordings and non-Rust viewers rely on it.
+- **Debug channel:** opt-in and per selected entity, in a separate message family, versioned with the build (the server and viewer must come from the same code version). It carries reflected dumps of the entity's actual simulation components, debug-drawing primitives emitted by the systems that produced a result, and the observations agents actually received.
+- **Ownership:** each simulation component or system owns its stable view export, its reflection, and its debug drawing, beside its implementation. The viewer is generic for debugging and has custom rendering only for the stable view, so debug data cannot drift from the simulation.
+
+Simulation components derive `Reflect`; the first two gain it the next time the simulation changes. Sharing simulation component types with the viewer, through a data-only package used only by the debug layer, is deferred until a component needs a typed inspector or the generic view proves too weak to debug a behavior. The viewer never runs simulation systems. The debug channel's messages and controls are designed with the feature that builds them.
+
 ## Decisions and open questions
 
 - For the first usable milestone, what are the concrete message contracts and visualization controls?
