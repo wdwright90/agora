@@ -7,7 +7,7 @@ This directory is the Cargo workspace for the Rust simulation framework. The [SA
 | Package | Purpose | Specs |
 | --- | --- | --- |
 | [`agora-protocol`](agora-protocol/) | Serde types for the client protocol. No networking. Tested against the shared JSON fixtures. | [SPEC-002](../docs/contracts/client-protocol.md) |
-| [`agora-server`](agora-server/) | Host application: WebSocket connections, sessions, run creation and joining, spawning, Start, action submission, step advancement, observation routing, and session and run lifetimes. Runs each simulation in its own task. | [SPEC-002](../docs/contracts/client-protocol.md), [SPEC-003](../docs/components/server/specs/sessions-and-runs.md) |
+| [`agora-server`](agora-server/) | Host application: WebSocket connections, sessions, run creation and joining, spawning, Start, action submission, step advancement, observation routing, viewers, and session and run lifetimes. Runs each simulation in its own task. | [SPEC-002](../docs/contracts/client-protocol.md), [SPEC-003](../docs/components/server/specs/sessions-and-runs.md) |
 | [`agora-sim`](agora-sim/) | Headless simulation: one run's grid, agents, action collection, and step execution. Uses `bevy_ecs`, with no rendering or networking. | [SPEC-001](../docs/components/simulation/specs/lifecycle-and-movement.md) |
 
 ## Toolchain
@@ -32,4 +32,4 @@ No CI runs these checks yet.
 cargo run -p agora-server -- --listen 127.0.0.1:7878
 ```
 
-`--help` lists the timeout flags. Set `RUST_LOG` (for example, `RUST_LOG=debug`) to change log detail.
+`--help` lists the timeout and step-interval flags. Set `RUST_LOG` (for example, `RUST_LOG=debug`) to change log detail.

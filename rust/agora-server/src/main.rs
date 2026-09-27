@@ -22,6 +22,9 @@ struct Args {
     /// Seconds a run survives with no sessions before it is released.
     #[arg(long, default_value_t = ServerConfig::DEFAULT_RUN_RELEASE.as_secs())]
     run_release_secs: u64,
+    /// Minimum milliseconds between step starts while a run has a connected viewer.
+    #[arg(long, default_value_t = ServerConfig::DEFAULT_STEP_INTERVAL.as_millis() as u64)]
+    step_interval_ms: u64,
 }
 
 #[tokio::main]
@@ -33,6 +36,7 @@ async fn main() -> std::io::Result<()> {
     let config = ServerConfig {
         session_expiry: Duration::from_secs(args.session_expiry_secs),
         run_release: Duration::from_secs(args.run_release_secs),
+        step_interval: Duration::from_millis(args.step_interval_ms),
     };
     let listener = TcpListener::bind(args.listen).await?;
     info!(address = %listener.local_addr()?, ?config, "listening");

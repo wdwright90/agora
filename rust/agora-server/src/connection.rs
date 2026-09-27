@@ -9,7 +9,7 @@ use agora_sim::{AgentLimitError, GridPos, SpawnError, SubmitError};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
 use tokio::net::TcpStream;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, info};
 
@@ -18,7 +18,7 @@ use crate::config::ServerConfig;
 use crate::registry::Registry;
 use crate::requests::{Admission, RequestLog};
 use crate::run::{
-    self, EntryRejection, Outbox, RunGone, RunHandle, StartRejection, SubmitRejection,
+    self, EntryRejection, Outbox, RunGone, RunHandle, StartRejection, SubmitRejection, ViewSlot,
 };
 use crate::wire;
 
@@ -33,16 +33,18 @@ pub async fn serve(stream: TcpStream, registry: Registry, config: ServerConfig) 
     };
     info!("connected");
     let (outbox, mut pushes) = mpsc::unbounded_channel();
+    let (view_slot, mut views) = watch::channel(None);
     let mut connection = Connection {
         registry,
         config,
         outbox,
+        view_slot,
         handshake_done: false,
         session: None,
     };
     loop {
-        // A request is answered before anything else is read, so the run's pushes queued while
-        // handling it are sent after its response.
+        // A request is answered before anything else is read, so the run's pushes and views
+        // produced while handling it are sent after its response.
         let reply = tokio::select! {
             frame = socket.next() => match frame {
                 Some(Ok(Message::Text(text))) => connection.receive(text.as_str()).await,
@@ -58,8 +60,12 @@ pub async fn serve(stream: TcpStream, registry: Registry, config: ServerConfig) 
                     break;
                 }
             },
-            // The connection holds a sender, so the channel never closes.
+            // The connection holds a sender for each channel, so neither closes.
             Some(push) = pushes.recv() => Reply::send(push),
+            Ok(()) = views.changed() => match views.borrow_and_update().clone() {
+                Some(view) => Reply::send(ServerMessage::ViewUpdate { view }),
+                None => continue,
+            },
         };
         let text = serde_json::to_string(&reply.message).expect("server messages serialize");
         if let Err(e) = socket.send(Message::text(text)).await {
@@ -82,6 +88,8 @@ struct Connection {
     config: ServerConfig,
     /// Given to the run on create or join, for messages it pushes to this connection.
     outbox: Outbox,
+    /// Given to the run on `watch`, for the views it publishes to this connection.
+    view_slot: ViewSlot,
     handshake_done: bool,
     session: Option<SessionLink>,
 }
@@ -91,6 +99,7 @@ struct SessionLink {
     id: SessionId,
     run_id: RunId,
     run: RunHandle,
+    view_slot: ViewSlot,
     requests: RequestLog,
 }
 
@@ -243,6 +252,7 @@ impl Connection {
             id: session,
             run_id,
             run,
+            view_slot: self.view_slot.clone(),
             requests: RequestLog::new(id, request, response.clone()),
         });
         response
@@ -299,6 +309,14 @@ impl SessionLink {
                         Err(rejection) => ServerMessage::Error(submit_error(id, rejection)),
                     })
             }
+            ClientMessage::Watch { .. } => self
+                .run
+                .watch(self.id.clone(), self.view_slot.clone())
+                .await
+                .map(|view| ServerMessage::Watching {
+                    request_id: id,
+                    view,
+                }),
             ClientMessage::Hello { .. } => unreachable!("hello is not a request"),
         };
         // A run is not released while it has a connected session, so this is not expected.

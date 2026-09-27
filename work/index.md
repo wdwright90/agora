@@ -4,7 +4,7 @@ Substantial tasks use stable directories named `AGORA-NNN-short-name`. Allocate 
 
 ## Active work
 
-- [AGORA-004 — First usable milestone](AGORA-004-first-milestone/brief.md): small-PR sequence toward the empty-grid milestone; PRs 1–3 merged; PR 4a (server steps and observations) in review as #7.
+- [AGORA-004 — First usable milestone](AGORA-004-first-milestone/brief.md): small-PR sequence toward the empty-grid milestone; PRs 1–3 and 4a merged; PR 4b (server viewers) in review.
 
 - [AGORA-003 — Server and client connection management](AGORA-003-server-client-connections/brief.md): architecture checkpoint; first-milestone implementation continues in AGORA-004.
 

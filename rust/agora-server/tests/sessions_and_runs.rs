@@ -4,7 +4,7 @@
 mod common;
 
 use std::collections::HashSet;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use agora_protocol::{Direction, ErrorCode, Placement, RunPhase, ServerMessage};
 use agora_server::ServerConfig;
@@ -133,6 +133,7 @@ async fn r06_a_disconnected_session_keeps_its_run_until_it_expires() {
     let address = start_server(ServerConfig {
         session_expiry: LONG,
         run_release: SHORT,
+        ..ServerConfig::default()
     })
     .await;
     let (creator, run_id) = Client::with_new_run(address).await;
@@ -154,6 +155,7 @@ async fn r07_a_run_whose_sessions_have_all_expired_is_released() {
     let address = start_server(ServerConfig {
         session_expiry: SHORT,
         run_release: SHORT,
+        ..ServerConfig::default()
     })
     .await;
     let (creator, run_id) = Client::with_new_run(address).await;
@@ -170,6 +172,7 @@ async fn r07_joining_before_release_keeps_the_run() {
     let address = start_server(ServerConfig {
         session_expiry: SHORT,
         run_release: LONG,
+        ..ServerConfig::default()
     })
     .await;
     let (mut creator, run_id) = Client::with_new_run(address).await;
@@ -194,6 +197,7 @@ async fn r07_a_connected_session_keeps_its_run() {
     let address = start_server(ServerConfig {
         session_expiry: SHORT,
         run_release: SHORT,
+        ..ServerConfig::default()
     })
     .await;
     let (_creator, run_id) = Client::with_new_run(address).await;
@@ -264,6 +268,7 @@ async fn r06_an_expired_sessions_agents_are_removed_and_the_run_continues() {
     let address = start_server(ServerConfig {
         session_expiry: SHORT,
         run_release: LONG,
+        ..ServerConfig::default()
     })
     .await;
     let (mut creator, run_id) = Client::with_new_run(address).await;
@@ -286,6 +291,7 @@ async fn r07_a_run_waiting_for_actions_is_released() {
     let address = start_server(ServerConfig {
         session_expiry: SHORT,
         run_release: SHORT,
+        ..ServerConfig::default()
     })
     .await;
     let (mut creator, run_id) = Client::with_new_run(address).await;
@@ -299,4 +305,92 @@ async fn r07_a_run_waiting_for_actions_is_released() {
 
     let mut late = Client::connect_with_hello(address).await;
     expect_code(late.join_run(&run_id).await, ErrorCode::UnknownRun);
+}
+
+#[tokio::test]
+async fn r04_a_viewer_makes_a_run_without_agents_eligible() {
+    let address = start_default_server().await;
+    let (mut creator, _) = Client::with_new_run(address).await;
+    creator.watch().await;
+
+    let reply = creator.start().await;
+
+    assert!(matches!(reply, ServerMessage::Started { .. }), "{reply:?}");
+}
+
+#[tokio::test]
+async fn r04_a_disconnected_viewer_does_not_count() {
+    let address = start_default_server().await;
+    let (mut creator, run_id) = Client::with_new_run(address).await;
+    let mut viewer = Client::joined(address, &run_id).await;
+    viewer.watch().await;
+
+    viewer.close().await;
+    tokio::time::sleep(SETTLE).await;
+
+    expect_code(creator.start().await, ErrorCode::StartNotEligible);
+}
+
+/// Start a run with one agent owned by `player`, execute the first step, and return the agent.
+async fn first_step(player: &mut Client) -> agora_protocol::AgentId {
+    let agent = expect_spawned(player.spawn(Placement::Random).await);
+    player.start().await;
+    player.observations().await;
+    player.submit(state(0), vec![stay(agent)]).await;
+    assert_eq!(player.observations().await, (state(1), vec![agent]));
+    agent
+}
+
+#[tokio::test]
+async fn r11_a_viewer_holds_steps_to_the_step_interval() {
+    let address = start_server(ServerConfig {
+        step_interval: LONG,
+        ..ServerConfig::default()
+    })
+    .await;
+    let (mut player, run_id) = Client::with_new_run(address).await;
+    let mut viewer = Client::joined(address, &run_id).await;
+    viewer.watch().await;
+    let agent = first_step(&mut player).await;
+
+    player.submit(state(1), vec![stay(agent)]).await;
+    player.expect_silence(SETTLE).await;
+
+    // The last viewer leaving lifts the interval, and the waiting step executes.
+    viewer.close().await;
+    assert_eq!(player.observations().await, (state(2), vec![agent]));
+}
+
+#[tokio::test]
+async fn r11_a_held_step_executes_when_the_interval_passes() {
+    let address = start_server(ServerConfig {
+        step_interval: Duration::from_millis(100),
+        ..ServerConfig::default()
+    })
+    .await;
+    let (mut player, run_id) = Client::with_new_run(address).await;
+    let mut viewer = Client::joined(address, &run_id).await;
+    viewer.watch().await;
+    let agent = first_step(&mut player).await;
+    let after_first = Instant::now();
+
+    player.submit(state(1), vec![stay(agent)]).await;
+
+    assert_eq!(player.observations().await, (state(2), vec![agent]));
+    assert!(after_first.elapsed() >= Duration::from_millis(50));
+}
+
+#[tokio::test]
+async fn r11_without_viewers_steps_are_not_held() {
+    let address = start_server(ServerConfig {
+        step_interval: LONG,
+        ..ServerConfig::default()
+    })
+    .await;
+    let (mut player, _) = Client::with_new_run(address).await;
+    let agent = first_step(&mut player).await;
+
+    player.submit(state(1), vec![stay(agent)]).await;
+
+    assert_eq!(player.observations().await, (state(2), vec![agent]));
 }

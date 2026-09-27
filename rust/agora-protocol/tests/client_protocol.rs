@@ -82,6 +82,8 @@ fn r01_r08_valid_server_fixtures_round_trip_and_cover_every_type() {
             "started",
             "submitted",
             "observations",
+            "watching",
+            "view_update",
             "error"
         ])
     );
@@ -131,7 +133,7 @@ fn r05_versions_parse_as_semver_core() {
     ] {
         assert!(bad.parse::<ProtocolVersion>().is_err(), "{bad:?}");
     }
-    assert_eq!(PROTOCOL_VERSION.to_string(), "0.2.0");
+    assert_eq!(PROTOCOL_VERSION.to_string(), "0.3.0");
 }
 
 #[test]
@@ -140,9 +142,9 @@ fn r06_mvp_compatibility_requires_an_exact_match() {
     assert!(v.is_compatible_with(v));
     for other in [
         ProtocolVersion::new(0, 1, 0),
-        ProtocolVersion::new(0, 2, 1),
-        ProtocolVersion::new(0, 3, 0),
-        ProtocolVersion::new(1, 2, 0),
+        ProtocolVersion::new(0, 3, 1),
+        ProtocolVersion::new(0, 2, 0),
+        ProtocolVersion::new(1, 3, 0),
     ] {
         assert!(!v.is_compatible_with(other), "{other}");
     }

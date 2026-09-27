@@ -1,20 +1,21 @@
 //! One run's task. It owns the run's simulation, its sessions, and their timers, and handles
 //! commands from connections one at a time, which serializes all calls into the simulation.
-//! It advances the simulation as soon as every agent has an accepted action, and pushes each
-//! session its agents' observations.
+//! It advances the simulation once every agent has an accepted action, waiting out the step
+//! interval while viewers are watching. It pushes each session its agents' observations, and
+//! each viewer the newest view.
 
 use std::collections::HashMap;
 use std::future;
 
 use agora_protocol::{
-    AgentObservation, CatalogEntryId, Observation, RunId, RunPhase, ServerMessage, SessionId,
-    StateId,
+    AgentObservation, AgentView, CatalogEntryId, Observation, RunId, RunPhase, ServerMessage,
+    SessionId, StateId, View,
 };
 use agora_sim::{
     AgentId, Move, Observations, Placement, SimConfig, Simulation, SpawnError, Status, Submission,
     SubmitError,
 };
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{Instant, sleep_until};
 use tracing::{Instrument, debug, info, info_span};
 
@@ -29,6 +30,10 @@ const COMMAND_QUEUE: usize = 64;
 /// Where a run sends a session's pushed messages. The session's connection writes them after
 /// the response it is sending, if any.
 pub type Outbox = mpsc::UnboundedSender<ServerMessage>;
+
+/// Where a run publishes views to a viewer's connection. It holds only the newest view, so a
+/// slow viewer skips states instead of queueing them.
+pub type ViewSlot = watch::Sender<Option<View>>;
 
 /// A connection's handle to a run's task.
 #[derive(Clone)]
@@ -93,6 +98,11 @@ enum Command {
         actions: Vec<(AgentId, Move)>,
         reply: oneshot::Sender<Result<EntryResults, SubmitRejection>>,
     },
+    Watch {
+        session: SessionId,
+        slot: ViewSlot,
+        reply: oneshot::Sender<View>,
+    },
     Disconnect {
         session: SessionId,
     },
@@ -134,6 +144,16 @@ impl RunHandle {
             session,
             state,
             actions,
+            reply,
+        })
+        .await
+    }
+
+    /// Make `session` a viewer that receives views through `slot`. Returns the current view.
+    pub async fn watch(&self, session: SessionId, slot: ViewSlot) -> Result<View, RunGone> {
+        self.call(|reply| Command::Watch {
+            session,
+            slot,
             reply,
         })
         .await
@@ -185,6 +205,8 @@ pub fn create(
         sim,
         sessions: HashMap::new(),
         release_at: None,
+        last_step: None,
+        advance_at: None,
         registry: registry.clone(),
         config,
     };
@@ -203,6 +225,10 @@ struct Run {
     sessions: HashMap<SessionId, Session>,
     /// When the run is released. Set only while the run has no sessions.
     release_at: Option<Instant>,
+    /// When the most recent step started.
+    last_step: Option<Instant>,
+    /// When a ready step may start. Set only while the step interval holds it back.
+    advance_at: Option<Instant>,
     registry: Registry,
     config: ServerConfig,
 }
@@ -213,6 +239,8 @@ struct Session {
     agents: Vec<AgentId>,
     /// Where to push this session's messages. `None` while it has no connection.
     outbox: Option<Outbox>,
+    /// Where to publish views, while the session is a connected viewer.
+    viewer: Option<ViewSlot>,
     /// When the session expires. Set only while it has no connection.
     expires_at: Option<Instant>,
 }
@@ -230,7 +258,7 @@ impl Run {
                     None => return,
                 },
                 () = sleep_until_some(deadline) => {
-                    if self.expire(Instant::now()) {
+                    if self.on_deadline(Instant::now()) {
                         self.registry.remove(&self.id);
                         info!("run released");
                         return;
@@ -258,6 +286,7 @@ impl Run {
                 if let Ok(agent) = result {
                     self.session_mut(&session).agents.push(agent);
                     info!(%session, agent = agent.0, "agent spawned");
+                    self.publish_view();
                 }
                 let _ = reply.send(result);
             }
@@ -271,14 +300,27 @@ impl Run {
                 reply,
             } => {
                 let _ = reply.send(self.submit(&session, state, actions));
-                self.advance_if_ready();
+                self.advance_if_ready(Instant::now());
+            }
+            Command::Watch {
+                session,
+                slot,
+                reply,
+            } => {
+                if self.session_mut(&session).viewer.replace(slot).is_none() {
+                    info!(%session, "session is watching");
+                }
+                let _ = reply.send(self.view());
             }
             Command::Disconnect { session: id } => {
                 let expires_at = Instant::now() + self.config.session_expiry;
                 let session = self.session_mut(&id);
                 session.outbox = None;
+                session.viewer = None;
                 session.expires_at = Some(expires_at);
                 info!(session = %id, "session disconnected; expiry timer started");
+                // The last viewer leaving lifts the step interval.
+                self.advance_if_ready(Instant::now());
             }
         }
     }
@@ -290,9 +332,8 @@ impl Run {
         if self.phase() != RunPhase::Setup {
             return Err(StartRejection::AlreadyStarted);
         }
-        // A run needs agents or connected viewers to start. Viewers do not exist yet, so a run
-        // without agents is not eligible.
-        if self.sim.agent_count() == 0 {
+        // A run needs agents or connected viewers to start.
+        if self.sim.agent_count() == 0 && !self.has_viewers() {
             return Err(StartRejection::NotEligible);
         }
         let observations = self
@@ -301,6 +342,7 @@ impl Run {
             .map_err(|_| StartRejection::AlreadyStarted)?;
         info!("run started");
         self.deliver(&observations);
+        self.publish_view();
         Ok(())
     }
 
@@ -340,15 +382,65 @@ impl Run {
             .collect())
     }
 
-    /// Execute a step if every agent has an accepted action. There is no pacing gate yet, so
-    /// the run advances as fast as its agents submit.
-    fn advance_if_ready(&mut self) {
+    /// Execute a step if every agent has an accepted action. While the run has a connected
+    /// viewer, a step starts no sooner than the step interval after the previous one, and
+    /// `advance_at` schedules it. Without viewers the run advances as fast as agents submit.
+    fn advance_if_ready(&mut self, now: Instant) {
+        self.advance_at = None;
         if !self.sim.readiness().is_ready() {
             return;
         }
+        if self.has_viewers()
+            && let Some(last) = self.last_step
+        {
+            let at = last + self.config.step_interval;
+            if at > now {
+                self.advance_at = Some(at);
+                return;
+            }
+        }
+        self.last_step = Some(now);
         let observations = self.sim.advance().expect("the run is ready to advance");
         debug!(state = observations.state.0, "step executed");
         self.deliver(&observations);
+        self.publish_view();
+    }
+
+    fn has_viewers(&self) -> bool {
+        self.sessions
+            .values()
+            .any(|session| session.viewer.is_some())
+    }
+
+    /// Publish the current view to every connected viewer, replacing any view it has not sent.
+    fn publish_view(&self) {
+        if !self.has_viewers() {
+            return;
+        }
+        let view = self.view();
+        for slot in self.sessions.values().filter_map(|s| s.viewer.as_ref()) {
+            slot.send_replace(Some(view.clone()));
+        }
+    }
+
+    fn view(&self) -> View {
+        let view = self.sim.view();
+        View {
+            state_id: StateId::new(view.state.0).expect("state IDs stay below 2^53"),
+            phase: self.phase(),
+            width: view.width,
+            height: view.height,
+            agents: view
+                .agents
+                .iter()
+                .map(|agent| AgentView {
+                    agent_id: agora_protocol::AgentId::new(agent.id.0)
+                        .expect("agent IDs stay below 2^53"),
+                    x: agent.position.x,
+                    y: agent.position.y,
+                })
+                .collect(),
+        }
     }
 
     /// Push each connected session the observations of the agents it owns. Sessions without a
@@ -390,6 +482,7 @@ impl Run {
                 creator,
                 agents: Vec::new(),
                 outbox: Some(outbox),
+                viewer: None,
                 expires_at: None,
             },
         );
@@ -403,10 +496,12 @@ impl Run {
         }
     }
 
-    /// Expire sessions, removing their agents, and start the release timer as of `now`.
-    /// Returns whether the run should be released.
-    fn expire(&mut self, now: Instant) -> bool {
+    /// Handle deadlines as of `now`: expire sessions, removing their agents; start a step the
+    /// interval held back; and start the release timer. Returns whether the run should be
+    /// released.
+    fn on_deadline(&mut self, now: Instant) -> bool {
         let sim = &mut self.sim;
+        let mut removed = false;
         self.sessions.retain(|id, session| {
             let expired = session.expires_at.is_some_and(|at| at <= now);
             if expired {
@@ -414,6 +509,7 @@ impl Run {
                 for &agent in &session.agents {
                     sim.remove(agent)
                         .expect("a session's agents are in the world");
+                    removed = true;
                 }
                 info!(
                     session = %id,
@@ -424,8 +520,12 @@ impl Run {
             }
             !expired
         });
-        // The removed agents may have been the only ones without an action.
-        self.advance_if_ready();
+        if removed {
+            self.publish_view();
+        }
+        // The removed agents may have been the only ones without an action, or the step
+        // interval may have passed.
+        self.advance_if_ready(now);
         if self.sessions.is_empty() && self.release_at.is_none() {
             self.release_at = Some(now + self.config.run_release);
             info!("run has no sessions; release timer started");
@@ -438,6 +538,7 @@ impl Run {
             .values()
             .filter_map(|session| session.expires_at)
             .chain(self.release_at)
+            .chain(self.advance_at)
             .min()
     }
 

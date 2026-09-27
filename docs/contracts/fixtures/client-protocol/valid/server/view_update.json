@@ -1,0 +1,1 @@
+{ "type": "view_update", "view": { "state_id": 3, "phase": "started", "width": 10, "height": 10, "agents": [{ "agent_id": 1, "x": 1, "y": 9 }, { "agent_id": 2, "x": 5, "y": 4 }] } }

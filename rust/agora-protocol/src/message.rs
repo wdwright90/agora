@@ -37,6 +37,8 @@ pub enum ClientMessage {
         state_id: StateId,
         actions: Vec<ActionEntry>,
     },
+    /// Become a viewer of the run until the connection closes.
+    Watch { request_id: RequestId },
 }
 
 impl ClientMessage {
@@ -49,6 +51,7 @@ impl ClientMessage {
         "spawn",
         "start",
         "submit",
+        "watch",
     ];
 
     /// The request ID, for every message except `hello`.
@@ -59,7 +62,8 @@ impl ClientMessage {
             | Self::JoinRun { request_id, .. }
             | Self::Spawn { request_id, .. }
             | Self::Start { request_id }
-            | Self::Submit { request_id, .. } => Some(*request_id),
+            | Self::Submit { request_id, .. }
+            | Self::Watch { request_id } => Some(*request_id),
         }
     }
 }
@@ -106,6 +110,10 @@ pub enum ServerMessage {
         state_id: StateId,
         observations: Vec<AgentObservation>,
     },
+    /// Successful `watch`: the session is a viewer, and `view` is the run's current state.
+    Watching { request_id: RequestId, view: View },
+    /// Pushed by the server, not a response: the run's newest state, for viewers.
+    ViewUpdate { view: View },
     /// Any failed request or rejected message.
     Error(ErrorResponse),
 }
@@ -174,6 +182,27 @@ pub struct AgentObservation {
 /// An agent observation. Empty in this version; later versions add fields.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Observation {}
+
+/// A complete view of a run's world, separate from agent observations.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct View {
+    pub state_id: StateId,
+    pub phase: RunPhase,
+    /// Grid width in cells.
+    pub width: u32,
+    /// Grid height in cells.
+    pub height: u32,
+    /// Every agent, in ascending ID order.
+    pub agents: Vec<AgentView>,
+}
+
+/// One agent's position in a view. `(0, 0)` is the south-west corner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentView {
+    pub agent_id: AgentId,
+    pub x: u32,
+    pub y: u32,
+}
 
 /// Run lifecycle phase.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
