@@ -1,10 +1,10 @@
 # Handoff
 
-Checkpoint: 2026-09-26, PR 4b (`agora-server` viewers) on branch `feature/server-viewers`. PR 1 (`agora-sim` core) merged as #3, PR 2 (client protocol) as #4, PR 3 (`agora-server` part 1) as #5, and PR 4a (steps and observations) as #7.
+Checkpoint: 2026-09-26, PR 4b (`agora-server` viewers) open as #8 on branch `feature/server-viewers`. PR 1 (`agora-sim` core) merged as #3, PR 2 (client protocol) as #4, PR 3 (`agora-server` part 1) as #5, and PR 4a (steps and observations) as #7.
 
 ## Resume here
 
-Check PR 4b's review comments with `gh pr view <number> --comments` and the inline comments through the GitHub API. Answer questions, and agree any changes before making them on `feature/server-viewers`.
+Check PR 4b's review comments with `gh pr view 8 --comments` and the inline comments through the GitHub API. Answer questions, and agree any changes before making them on `feature/server-viewers`.
 
 Once 4b has merged, agree the scope of PR 4c (pacing controls: pause, single-step, rate changes, unlimited, and controller claims and handover) with the maintainer before implementing it.
 
