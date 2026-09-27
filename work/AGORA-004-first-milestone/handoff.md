@@ -1,10 +1,10 @@
 # Handoff
 
-Checkpoint: 2026-09-27, PR 6 (`agora-viewer`) on branch `feature/viewer`, the last PR of the milestone. PR 1 (`agora-sim` core) merged as #3, PR 2 (client protocol) as #4, PR 3 (`agora-server` part 1) as #5, PR 4a (steps and observations) as #7, PR 4b (viewers) as #8, PR 4c (pacing) as #9, PR 5 (`agora-client`) as #10, and ADR-002 as #12.
+Checkpoint: 2026-09-27, PR 6 (`agora-viewer`) open as #13 on branch `feature/viewer`, the last PR of the milestone. PR 1 (`agora-sim` core) merged as #3, PR 2 (client protocol) as #4, PR 3 (`agora-server` part 1) as #5, PR 4a (steps and observations) as #7, PR 4b (viewers) as #8, PR 4c (pacing) as #9, PR 5 (`agora-client`) as #10, and ADR-002 as #12.
 
 ## Resume here
 
-Check PR 6's review comments with `gh pr view <number> --comments` and the inline comments through the GitHub API, and agree any changes before making them on `feature/viewer`.
+Check PR 6's review comments with `gh pr view 13 --comments` and the inline comments through the GitHub API, and agree any changes before making them on `feature/viewer`.
 
 The maintainer ran the milestone's manual check on 2026-09-27 (the server, `agora-viewer --create`, and two `agora-demo join` clients; SPEC-005, "Manual check") and confirmed it in the window. Once PR 6 has merged, mark AGORA-004 completed in its brief and the work index, and agree the next task with the maintainer.
 
