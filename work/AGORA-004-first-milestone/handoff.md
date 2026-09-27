@@ -1,12 +1,12 @@
 # Handoff
 
-Checkpoint: 2026-09-27, PR 5 (`agora-client`) open as #10 on branch `feature/client`. PR 1 (`agora-sim` core) merged as #3, PR 2 (client protocol) as #4, PR 3 (`agora-server` part 1) as #5, PR 4a (steps and observations) as #7, PR 4b (viewers) as #8, and PR 4c (pacing) as #9. The server side of the milestone is complete.
+Checkpoint: 2026-09-27, ADR-002 (simulation inspection and debug visualization) open as #12 on branch `docs/inspection-adr`, a documentation PR ahead of the viewer. PR 1 (`agora-sim` core) merged as #3, PR 2 (client protocol) as #4, PR 3 (`agora-server` part 1) as #5, PR 4a (steps and observations) as #7, PR 4b (viewers) as #8, PR 4c (pacing) as #9, and PR 5 (`agora-client`) as #10.
 
 ## Resume here
 
-Check PR 5's review comments with `gh pr view 10 --comments` and the inline comments through the GitHub API. Answer questions, and agree any changes before making them on `feature/client`.
+Check the ADR-002 PR's review comments with `gh pr view 12 --comments` and the inline comments through the GitHub API, and agree any changes before making them.
 
-Once PR 5 has merged, the last step is PR 6 (`agora-viewer`). It needs a viewer CDD first, agreed with the maintainer before implementing; the maintainer asked on #8 how views will be drawn, and the answer sketched Bevy sprites synced from complete views, a background network task, and interpolation between steps.
+Once it has merged, build PR 6 (`agora-viewer`) with a new viewer CDD (CDD-004) and spec (SPEC-005), following the viewer decisions below. The maintainer has agreed the design; no further scope discussion is needed unless something unclear comes up.
 
 ## Decisions
 
@@ -60,13 +60,22 @@ Once PR 5 has merged, the last step is PR 6 (`agora-viewer`). It needs a viewer 
   - The demo has `create [--start-at M] [--unlimited]` and `join <RUN_ID>`, spawns `--agents` agents, and moves them at random until `--steps` or Ctrl-C.
   - The client gets its own CDD (CDD-003) and spec (SPEC-004).
   - The maintainer decided not to guard against or document clients reading views to "cheat": Agora is for training, and cheating only defeats the client's own training.
-  - Settled in PR 5 review before opening (2026-09-27):
+  - Settled in PR 5 review before opening (2026-09-27), and merged as #10:
     - `create_run` and `join_run` consume the `Client`, so a connection carries at most one session, as the protocol requires. The maintainer agreed: programs in several runs open several connections.
     - `Session` is a cloneable handle, and the observation stream is a separate `Observations` value returned with it. The first draft kept the stream inside the session, so a session shared between tasks could not read observations; the maintainer asked for the fix in this PR.
     - Request numbering and queueing happen under one lock, so concurrent tasks send in number order (a bug the first draft had, caught by a test).
     - `ServerMessage::request_id()` was added to `agora-protocol`, without a wire change.
     - The demo is behind a `demo` feature, on by default, at the maintainer's request.
     - The server's run log span no longer nests under the connection that created the run; a manual run showed the joiner's events logged under the creator's connection.
+- **PR 6 viewer design** (agreed 2026-09-27):
+  - `rust/agora-viewer`: a Bevy 0.19 binary with only the needed features, depending on `agora-client` (no default features) and `agora-protocol`, never `agora-sim`.
+  - A Tokio runtime on a background thread runs the client. UI actions reach it over a channel, and results and errors come back over another. A Bevy system reads the view and pacing latest-value handles each frame.
+  - Rendering: a 2D camera fitted to the grid, grid cells, and a shape per agent with a colour derived from its ID and its ID as a label. Entities are synced to each complete view, and movement is interpolated over a short time capped by the step interval. Rendering is data-driven (ADR-002). No pan or zoom yet.
+  - UI: `bevy_egui` 0.42 (it targets Bevy 0.19). A side panel shows status (a copyable run ID, state, phase, agent count, pacing mode, and whether this viewer controls pacing) and controls. Start is enabled only in setup with at least one agent. Pause, Step, Resume, an interval slider, and Unlimited are enabled only with control. Claim control is offered when control is vacant.
+  - Viewer startup is separate from run creation: `agora-viewer --create` or `agora-viewer --join <RUN_ID>`, one run per window. A future run browser (which needs a list-runs message) can open viewer windows by launching `--join`. After creating or joining, the viewer watches and claims control when vacant.
+  - Tests cover the entity sync in a headless Bevy app, the network bridge against an in-process server, and the control-enabling rules. The visuals are checked by hand by the maintainer.
+  - One PR, with CDD-004 and SPEC-005.
+- **ADR-002** (accepted 2026-09-27): three layers of viewer data (the stable view; an opt-in, same-build debug channel with reflected component dumps, debug-drawing primitives emitted by systems, and mirrored observations; and ownership of view export, reflection, and debug drawing beside each component). Sharing simulation component types with the viewer, through a data-only crate for the debug layer only, waits for a trigger: a component that needs a typed inspector, or the generic tree proving too weak. From now on simulation components derive `Reflect`; `Agent` and `Position` in `agora-sim` do not yet, and gain it the next time the simulation changes.
 
 ## PR 5 contents
 
