@@ -11,7 +11,8 @@ use crate::version::ProtocolVersion;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMessage {
-    /// First message on every connection. Not a request: it has no request ID.
+    /// First message on every connection: the protocol version handshake. It belongs to the
+    /// connection, does not create a session, and is not a request, so it has no request ID.
     Hello { protocol_version: ProtocolVersion },
     /// Create a run from a catalog entry and establish this connection's session as its creator.
     CreateRun {
@@ -33,6 +34,10 @@ pub enum ClientMessage {
 }
 
 impl ClientMessage {
+    /// The `type` wire name of every client message. A frame whose `type` is not listed here
+    /// is an unknown message type rather than a malformed message.
+    pub const TYPES: &[&str] = &["hello", "create_run", "join_run", "spawn", "start"];
+
     /// The request ID, for every message except `hello`.
     pub fn request_id(&self) -> Option<RequestId> {
         match self {

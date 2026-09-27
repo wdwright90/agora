@@ -35,4 +35,4 @@ Out of scope for this task:
 ## Dependencies and open questions
 
 - [AGORA-003 handoff](../AGORA-003-server-client-connections/handoff.md): architecture decisions this work builds on, and the details to settle as features need them.
-- Protocol details are open until PR 2: ID and counter representations, the version-compatibility policy, and bootstrap correlation.
+- Protocol details (ID and counter representations, the version-compatibility policy, and bootstrap correlation) were settled in PR 2. The [handoff](handoff.md) records them.
