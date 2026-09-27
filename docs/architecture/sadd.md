@@ -155,7 +155,7 @@ Clients own model training, including weight updates. The Python project provide
 
 ### Rust package mapping
 
-The maintainer accepted this package split in [ADR-001](../decisions/0001-rust-package-boundaries.md), which records the rationale. Packages are created as features need them; `agora-protocol`, `agora-sim`, `agora-server`, and `agora-client` exist, and the others are planned. Each logical component will receive a [CDD](../components/README.md) as its design is developed.
+The maintainer accepted this package split in [ADR-001](../decisions/0001-rust-package-boundaries.md), which records the rationale. Packages are created as features need them; `agora-protocol`, `agora-sim`, `agora-server`, `agora-client`, and `agora-viewer` exist, and `agora-recording` is planned. Each logical component will receive a [CDD](../components/README.md) as its design is developed.
 
 | Package | Responsibility | First milestone |
 | --- | --- | --- |

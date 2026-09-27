@@ -1,12 +1,12 @@
 # Handoff
 
-Checkpoint: 2026-09-27, ADR-002 (simulation inspection and debug visualization) open as #12 on branch `docs/inspection-adr`, a documentation PR ahead of the viewer. PR 1 (`agora-sim` core) merged as #3, PR 2 (client protocol) as #4, PR 3 (`agora-server` part 1) as #5, PR 4a (steps and observations) as #7, PR 4b (viewers) as #8, PR 4c (pacing) as #9, and PR 5 (`agora-client`) as #10.
+Checkpoint: 2026-09-27, PR 6 (`agora-viewer`) open as #13 on branch `feature/viewer`, the last PR of the milestone. PR 1 (`agora-sim` core) merged as #3, PR 2 (client protocol) as #4, PR 3 (`agora-server` part 1) as #5, PR 4a (steps and observations) as #7, PR 4b (viewers) as #8, PR 4c (pacing) as #9, PR 5 (`agora-client`) as #10, and ADR-002 as #12.
 
 ## Resume here
 
-Check the ADR-002 PR's review comments with `gh pr view 12 --comments` and the inline comments through the GitHub API, and agree any changes before making them.
+Check PR 6's review comments with `gh pr view 13 --comments` and the inline comments through the GitHub API, and agree any changes before making them on `feature/viewer`.
 
-Once it has merged, build PR 6 (`agora-viewer`) with a new viewer CDD (CDD-004) and spec (SPEC-005), following the viewer decisions below. The maintainer has agreed the design; no further scope discussion is needed unless something unclear comes up.
+The maintainer ran the milestone's manual check on 2026-09-27 (the server, `agora-viewer --create`, and two `agora-demo join` clients; SPEC-005, "Manual check") and confirmed it in the window. Once PR 6 has merged, mark AGORA-004 completed in its brief and the work index, and agree the next task with the maintainer.
 
 ## Decisions
 
@@ -77,6 +77,17 @@ Once it has merged, build PR 6 (`agora-viewer`) with a new viewer CDD (CDD-004) 
   - One PR, with CDD-004 and SPEC-005.
 - **ADR-002** (accepted 2026-09-27): three layers of viewer data (the stable view; an opt-in, same-build debug channel with reflected component dumps, debug-drawing primitives emitted by systems, and mirrored observations; and ownership of view export, reflection, and debug drawing beside each component). Sharing simulation component types with the viewer, through a data-only crate for the debug layer only, waits for a trigger: a component that needs a typed inspector, or the generic tree proving too weak. From now on simulation components derive `Reflect`; `Agent` and `Position` in `agora-sim` do not yet, and gain it the next time the simulation changes.
 
+## PR 6 contents
+
+- `rust/agora-viewer`: a library (`network` bridge, `state`, `render`, `controls`, and the `egui` panel) and the `agora-viewer` executable, built on Bevy 0.19 (`2d` feature set) and `bevy_egui` 0.42.
+- Workspace: `bevy`, `bevy_egui`, and `agora-client` (without default features) added to the workspace dependencies.
+- Docs: CDD-004 and SPEC-005 (new), the components index, the SADD package status, `rust/README.md` (package table and how to run the milestone), the work index, and this handoff.
+- Choices made in PR 6, accepted by the maintainer after the manual check:
+  - The control panel is an anchored `egui` window rather than a side panel; `egui` 0.36 changed its panel API, and the camera keeps the grid clear of the window instead.
+  - Claim control is offered whenever this viewer lacks control, because the protocol does not say whether control is vacant.
+  - Move easing takes the shorter of 300 ms and 80% of the interval, 300 ms while paused, and snaps when unlimited.
+  - The interval slider covers 20 ms to 5 s on a logarithmic scale.
+
 ## PR 5 contents
 
 - `rust/agora-client`: the library (`Client`, `Session`, `Observations`, `SessionInfo`, `ObservationBatch`, and `ClientError`) and the `agora-demo` executable behind the default `demo` feature.
@@ -103,7 +114,8 @@ Once it has merged, build PR 6 (`agora-viewer`) with a new viewer CDD (CDD-004) 
 In `rust/`:
 
 - `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo doc --no-deps --workspace` with `-D warnings`: all passed.
-- `cargo test --workspace`: 113 passed (35 in agora-sim, 12 in agora-protocol, 57 in agora-server, and 9 in agora-client: 8 library and 1 demo).
+- `cargo test --workspace`: 121 passed (35 in agora-sim, 12 in agora-protocol, 57 in agora-server, 9 in agora-client, and 8 in agora-viewer: 2 unit and 6 integration).
+- The viewer was launched against a server with two demo clients joined: it opened its window on the GPU, created and watched the run, claimed pacing control, and ran without errors until stopped. The maintainer then pressed Start and checked the drawing and controls in the window: the manual check passed.
 - The agora-client and agora-server tests passed in 8 consecutive runs. `agora-client` also passes clippy and its tests with `--no-default-features`, and then has no demo dependencies. The R03 ordering test failed every time when out-of-order sending was reintroduced on purpose.
 - Manual run: `agora-server` with a `create --start-at 2` demo and a `join` demo, each with one agent. Both saw states 0 to 5 in step, the steps after the first were about 500 ms apart because the creator watches, both exited successfully, and the server returned to unlimited pacing when the viewer left. A second run confirmed the run's log lines are no longer under the creator's connection.
 
