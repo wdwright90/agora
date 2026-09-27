@@ -1,10 +1,10 @@
 # Handoff
 
-Checkpoint: 2026-09-27, PR 4c (`agora-server` pacing) on branch `feature/server-pacing`. PR 1 (`agora-sim` core) merged as #3, PR 2 (client protocol) as #4, PR 3 (`agora-server` part 1) as #5, PR 4a (steps and observations) as #7, and PR 4b (viewers) as #8. With 4c, the server side of the milestone is complete.
+Checkpoint: 2026-09-27, PR 4c (`agora-server` pacing) open as #9 on branch `feature/server-pacing`. PR 1 (`agora-sim` core) merged as #3, PR 2 (client protocol) as #4, PR 3 (`agora-server` part 1) as #5, PR 4a (steps and observations) as #7, and PR 4b (viewers) as #8. With 4c, the server side of the milestone is complete.
 
 ## Resume here
 
-Check PR 4c's review comments with `gh pr view <number> --comments` and the inline comments through the GitHub API. Answer questions, and agree any changes before making them on `feature/server-pacing`.
+Check PR 4c's review comments with `gh pr view 9 --comments` and the inline comments through the GitHub API. Answer questions, and agree any changes before making them on `feature/server-pacing`.
 
 Once 4c has merged, agree the scope of PR 5 (`agora-client`: the Rust client library and a random-mover demo client) with the maintainer before implementing it. The viewer (PR 6) needs a viewer CDD first; the maintainer asked on #8 how views will be drawn, and the answer sketched Bevy sprites synced from complete views, a background network task, and interpolation between steps.
 
