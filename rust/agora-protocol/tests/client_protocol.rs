@@ -80,6 +80,8 @@ fn r01_r08_valid_server_fixtures_round_trip_and_cover_every_type() {
             "run_joined",
             "spawned",
             "started",
+            "submitted",
+            "observations",
             "error"
         ])
     );
@@ -129,7 +131,7 @@ fn r05_versions_parse_as_semver_core() {
     ] {
         assert!(bad.parse::<ProtocolVersion>().is_err(), "{bad:?}");
     }
-    assert_eq!(PROTOCOL_VERSION.to_string(), "0.1.0");
+    assert_eq!(PROTOCOL_VERSION.to_string(), "0.2.0");
 }
 
 #[test]
@@ -137,9 +139,10 @@ fn r06_mvp_compatibility_requires_an_exact_match() {
     let v = PROTOCOL_VERSION;
     assert!(v.is_compatible_with(v));
     for other in [
-        ProtocolVersion::new(0, 1, 1),
-        ProtocolVersion::new(0, 2, 0),
-        ProtocolVersion::new(1, 1, 0),
+        ProtocolVersion::new(0, 1, 0),
+        ProtocolVersion::new(0, 2, 1),
+        ProtocolVersion::new(0, 3, 0),
+        ProtocolVersion::new(1, 2, 0),
     ] {
         assert!(!v.is_compatible_with(other), "{other}");
     }
@@ -163,6 +166,25 @@ fn r09_unrecognized_error_codes_are_preserved() {
     assert_eq!(error.code, ErrorCode::Unrecognized("added_later".into()));
     let round_trip: Value = serde_json::to_value(ServerMessage::Error(error)).unwrap();
     assert_eq!(round_trip["code"], "added_later");
+}
+
+#[test]
+fn r10_an_accepted_entry_has_no_error_field() {
+    let text = r#"{ "type": "submitted", "request_id": 5, "state_id": 0, "results": [{ "agent_id": 1 }] }"#;
+    let ServerMessage::Submitted { results, .. } = serde_json::from_str(text).unwrap() else {
+        panic!("expected submitted");
+    };
+    assert_eq!(results[0].error, None);
+    let round_trip = serde_json::to_value(&results[0]).unwrap();
+    assert_eq!(round_trip, serde_json::json!({ "agent_id": 1 }));
+}
+
+#[test]
+fn r09_agent_limit_codes_carry_their_prefix() {
+    assert_eq!(
+        ErrorCode::DistanceBudgetExceeded.as_str(),
+        "agent_limit.distance_budget_exceeded"
+    );
 }
 
 #[test]

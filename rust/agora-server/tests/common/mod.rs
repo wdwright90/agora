@@ -2,12 +2,13 @@
 
 #![allow(dead_code, reason = "each test file uses a different subset")]
 
+use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::time::Duration;
 
 use agora_protocol::{
-    CatalogEntryId, ClientMessage, ErrorCode, ErrorResponse, PROTOCOL_VERSION, Placement,
-    RequestId, RunId, ServerMessage,
+    Action, ActionEntry, AgentId, CatalogEntryId, ClientMessage, Direction, EntryResult, ErrorCode,
+    ErrorResponse, PROTOCOL_VERSION, Placement, RequestId, RunId, ServerMessage, StateId,
 };
 use agora_server::{EMPTY_GRID_10X10, ServerConfig, serve};
 use futures_util::{SinkExt, StreamExt};
@@ -42,6 +43,46 @@ pub fn cell(x: u32, y: u32) -> Placement {
     Placement::Cell { x, y }
 }
 
+pub fn agent(n: u64) -> AgentId {
+    AgentId::new(n).unwrap()
+}
+
+pub fn state(n: u64) -> StateId {
+    StateId::new(n).unwrap()
+}
+
+/// An action entry moving `agent` by `distance` in `direction`.
+pub fn step(agent: AgentId, direction: Direction, distance: u32) -> ActionEntry {
+    ActionEntry {
+        agent_id: agent,
+        action: Action::Move {
+            direction,
+            distance,
+        },
+    }
+}
+
+/// An action entry keeping `agent` in place.
+pub fn stay(agent: AgentId) -> ActionEntry {
+    step(agent, Direction::North, 0)
+}
+
+/// The entry results of a `submitted` response, failing the test on any other message.
+pub fn expect_submitted(message: ServerMessage) -> Vec<EntryResult> {
+    match message {
+        ServerMessage::Submitted { results, .. } => results,
+        other => panic!("expected submitted, got {other:?}"),
+    }
+}
+
+/// The spawned agent's ID, failing the test on any other message.
+pub fn expect_spawned(message: ServerMessage) -> AgentId {
+    match message {
+        ServerMessage::Spawned { agent_id, .. } => agent_id,
+        other => panic!("expected spawned, got {other:?}"),
+    }
+}
+
 /// Unwrap an error response, failing the test on any other message.
 pub fn expect_error(message: ServerMessage) -> ErrorResponse {
     match message {
@@ -59,6 +100,8 @@ pub fn expect_code(message: ServerMessage, code: ErrorCode) -> ErrorResponse {
 pub struct Client {
     socket: WebSocketStream<MaybeTlsStream<TcpStream>>,
     next_request: u64,
+    /// Pushed `observations` messages set aside by [`Client::receive`].
+    observations: VecDeque<ServerMessage>,
 }
 
 impl Client {
@@ -68,6 +111,7 @@ impl Client {
         Self {
             socket,
             next_request: 1,
+            observations: VecDeque::new(),
         }
     }
 
@@ -126,7 +170,44 @@ impl Client {
             .await;
     }
 
+    /// The next message that is not a pushed `observations` message. Observations received
+    /// meanwhile are kept for [`Client::observations`].
     pub async fn receive(&mut self) -> ServerMessage {
+        loop {
+            match self.receive_raw().await {
+                message @ ServerMessage::Observations { .. } => {
+                    self.observations.push_back(message)
+                }
+                message => return message,
+            }
+        }
+    }
+
+    /// The next pushed `observations` message, as `(state_id, agent IDs)`.
+    pub async fn observations(&mut self) -> (StateId, Vec<AgentId>) {
+        let message = match self.observations.pop_front() {
+            Some(message) => message,
+            None => self.receive_raw().await,
+        };
+        match message {
+            ServerMessage::Observations {
+                state_id,
+                observations,
+            } => (state_id, observations.iter().map(|o| o.agent_id).collect()),
+            other => panic!("expected observations, got {other:?}"),
+        }
+    }
+
+    /// Require that no message arrives within `wait`.
+    pub async fn expect_silence(&mut self, wait: Duration) {
+        assert!(self.observations.is_empty(), "{:?}", self.observations);
+        if let Ok(frame) = tokio::time::timeout(wait, self.socket.next()).await {
+            panic!("expected no message, got {frame:?}");
+        }
+    }
+
+    /// The next message of any kind, in arrival order.
+    pub async fn receive_raw(&mut self) -> ServerMessage {
         loop {
             let frame = tokio::time::timeout(RECEIVE_TIMEOUT, self.socket.next())
                 .await
@@ -188,6 +269,16 @@ impl Client {
     pub async fn start(&mut self) -> ServerMessage {
         let request_id = self.next_id();
         self.exchange(&ClientMessage::Start { request_id }).await
+    }
+
+    pub async fn submit(&mut self, state_id: StateId, actions: Vec<ActionEntry>) -> ServerMessage {
+        let request_id = self.next_id();
+        self.exchange(&ClientMessage::Submit {
+            request_id,
+            state_id,
+            actions,
+        })
+        .await
     }
 
     /// Require that the server closes the connection next.

@@ -7,7 +7,7 @@ use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
 use crate::error::{
-    AdvanceError, AgentLimitError, ConfigError, SpawnError, StartError, SubmitError,
+    AdvanceError, AgentLimitError, ConfigError, RemoveError, SpawnError, StartError, SubmitError,
 };
 use crate::types::{
     AgentId, AgentView, GridPos, MOVEMENT_BUDGET, Move, Observation, Observations, Placement,
@@ -288,6 +288,27 @@ impl Simulation {
 
         self.world.resource_mut::<Lifecycle>().state.0 += 1;
         Ok(self.observations())
+    }
+
+    /// Remove an agent immediately, in any phase, for server-driven cleanup such as session
+    /// expiry. Frees its cell and discards any accepted action, without executing a step or
+    /// changing the state ID. Its ID is not reused.
+    ///
+    /// Queued client-requested removal, which waits for the post-action boundary, is separate.
+    pub fn remove(&mut self, agent: AgentId) -> Result<(), RemoveError> {
+        let entity = self
+            .world
+            .resource_mut::<Agents>()
+            .0
+            .remove(&agent)
+            .ok_or(RemoveError::UnknownAgent(agent))?;
+        let pos = self.position(entity);
+        let mut grid = self.world.resource_mut::<Grid>();
+        let index = grid.index(pos).expect("agent position is in bounds");
+        grid.occupancy[index] = None;
+        self.world.despawn(entity);
+        self.world.resource_mut::<PendingActions>().0.remove(&agent);
+        Ok(())
     }
 
     /// Complete view of the current world for viewers.

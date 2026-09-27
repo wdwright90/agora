@@ -1,0 +1,1 @@
+{ "type": "submit", "request_id": 5, "state_id": 0, "actions": [{ "agent_id": 1, "action": { "kind": "move", "direction": "north", "distance": 1 } }, { "agent_id": 2, "action": { "kind": "move", "direction": "west", "distance": 0 } }] }

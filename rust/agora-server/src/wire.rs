@@ -2,7 +2,7 @@
 
 use agora_protocol::{ClientMessage, ErrorCode, ErrorResponse, RequestId};
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 /// Parse one text frame into a client message, or the error to send back.
 pub fn parse(text: &str) -> Result<ClientMessage, ErrorResponse> {
@@ -50,9 +50,14 @@ pub fn malformed(request_id: Option<RequestId>, message: impl Into<String>) -> E
 
 /// Attach `details`, which must be a JSON object.
 pub fn with_details(mut error: ErrorResponse, details: Value) -> ErrorResponse {
+    error.details = Some(object(details));
+    error
+}
+
+/// Error details as a JSON object map.
+pub fn object(details: Value) -> Map<String, Value> {
     let Value::Object(details) = details else {
         panic!("error details must be a JSON object");
     };
-    error.details = Some(details);
-    error
+    details
 }

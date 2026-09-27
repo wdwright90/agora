@@ -2,13 +2,14 @@
 //! (SPEC-002).
 
 use agora_protocol::{
-    AgentId, ClientMessage, ErrorCode, ErrorResponse, PROTOCOL_VERSION, ProtocolVersion, RequestId,
-    RunId, ServerMessage, SessionId,
+    Action, AgentId, ClientMessage, Direction, EntryError, EntryResult, ErrorCode, ErrorResponse,
+    PROTOCOL_VERSION, ProtocolVersion, RequestId, RunId, ServerMessage, SessionId,
 };
-use agora_sim::{GridPos, SpawnError};
+use agora_sim::{AgentLimitError, GridPos, SpawnError, SubmitError};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
 use tokio::net::TcpStream;
+use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, info};
 
@@ -16,7 +17,9 @@ use crate::catalog;
 use crate::config::ServerConfig;
 use crate::registry::Registry;
 use crate::requests::{Admission, RequestLog};
-use crate::run::{self, RunGone, RunHandle, StartRejection};
+use crate::run::{
+    self, EntryRejection, Outbox, RunGone, RunHandle, StartRejection, SubmitRejection,
+};
 use crate::wire;
 
 /// Serve one TCP connection until the client disconnects.
@@ -29,26 +32,34 @@ pub async fn serve(stream: TcpStream, registry: Registry, config: ServerConfig) 
         }
     };
     info!("connected");
+    let (outbox, mut pushes) = mpsc::unbounded_channel();
     let mut connection = Connection {
         registry,
         config,
+        outbox,
         handshake_done: false,
         session: None,
     };
-    while let Some(frame) = socket.next().await {
-        let reply = match frame {
-            Ok(Message::Text(text)) => connection.receive(text.as_str()).await,
-            Ok(Message::Binary(_)) => Reply::error(wire::malformed(
-                None,
-                "binary frames are not supported; send JSON text frames",
-            )),
-            Ok(Message::Close(_)) => break,
-            // Tungstenite answers pings itself.
-            Ok(_) => continue,
-            Err(e) => {
-                debug!(error = %e, "read failed");
-                break;
-            }
+    loop {
+        // A request is answered before anything else is read, so the run's pushes queued while
+        // handling it are sent after its response.
+        let reply = tokio::select! {
+            frame = socket.next() => match frame {
+                Some(Ok(Message::Text(text))) => connection.receive(text.as_str()).await,
+                Some(Ok(Message::Binary(_))) => Reply::error(wire::malformed(
+                    None,
+                    "binary frames are not supported; send JSON text frames",
+                )),
+                Some(Ok(Message::Close(_))) | None => break,
+                // Tungstenite answers pings itself.
+                Some(Ok(_)) => continue,
+                Some(Err(e)) => {
+                    debug!(error = %e, "read failed");
+                    break;
+                }
+            },
+            // The connection holds a sender, so the channel never closes.
+            Some(push) = pushes.recv() => Reply::send(push),
         };
         let text = serde_json::to_string(&reply.message).expect("server messages serialize");
         if let Err(e) = socket.send(Message::text(text)).await {
@@ -69,6 +80,8 @@ pub async fn serve(stream: TcpStream, registry: Registry, config: ServerConfig) 
 struct Connection {
     registry: Registry,
     config: ServerConfig,
+    /// Given to the run on create or join, for messages it pushes to this connection.
+    outbox: Outbox,
     handshake_done: bool,
     session: Option<SessionLink>,
 }
@@ -179,8 +192,13 @@ impl Connection {
                         json!({ "catalog_entry": catalog_entry }),
                     ));
                 };
-                let (run_id, run, session) =
-                    run::create(catalog_entry.clone(), entry, &self.registry, self.config);
+                let (run_id, run, session) = run::create(
+                    catalog_entry.clone(),
+                    entry,
+                    &self.registry,
+                    self.config,
+                    self.outbox.clone(),
+                );
                 let response = ServerMessage::RunCreated {
                     request_id: id,
                     run_id: run_id.clone(),
@@ -193,7 +211,11 @@ impl Connection {
             }
             ClientMessage::JoinRun { run_id, .. } => {
                 let joined = match self.registry.get(run_id) {
-                    Some(run) => run.join().await.ok().map(|session| (run, session)),
+                    Some(run) => run
+                        .join(self.outbox.clone())
+                        .await
+                        .ok()
+                        .map(|session| (run, session)),
                     None => None,
                 };
                 let Some((run, session)) = joined else {
@@ -258,6 +280,25 @@ impl SessionLink {
                         Err(rejection) => ServerMessage::Error(start_error(id, rejection)),
                     })
             }
+            ClientMessage::Submit {
+                state_id, actions, ..
+            } => {
+                let actions = actions
+                    .iter()
+                    .map(|entry| (to_sim_agent(entry.agent_id), to_sim_move(entry.action)))
+                    .collect();
+                self.run
+                    .submit(self.id.clone(), agora_sim::StateId(state_id.get()), actions)
+                    .await
+                    .map(|result| match result {
+                        Ok(results) => ServerMessage::Submitted {
+                            request_id: id,
+                            state_id: *state_id,
+                            results: results.into_iter().map(entry_result).collect(),
+                        },
+                        Err(rejection) => ServerMessage::Error(submit_error(id, rejection)),
+                    })
+            }
             ClientMessage::Hello { .. } => unreachable!("hello is not a request"),
         };
         // A run is not released while it has a connected session, so this is not expected.
@@ -270,6 +311,84 @@ fn to_sim_placement(placement: agora_protocol::Placement) -> agora_sim::Placemen
     match placement {
         agora_protocol::Placement::Cell { x, y } => agora_sim::Placement::Cell(GridPos::new(x, y)),
         agora_protocol::Placement::Random => agora_sim::Placement::Random,
+    }
+}
+
+fn to_sim_agent(agent: AgentId) -> agora_sim::AgentId {
+    agora_sim::AgentId(agent.get())
+}
+
+fn to_sim_move(action: Action) -> agora_sim::Move {
+    let Action::Move {
+        direction,
+        distance,
+    } = action;
+    let direction = match direction {
+        Direction::North => agora_sim::Direction::North,
+        Direction::East => agora_sim::Direction::East,
+        Direction::South => agora_sim::Direction::South,
+        Direction::West => agora_sim::Direction::West,
+    };
+    agora_sim::Move {
+        direction,
+        distance,
+    }
+}
+
+fn submit_error(id: RequestId, rejection: SubmitRejection) -> ErrorResponse {
+    match rejection {
+        SubmitRejection::NotStarted => wire::error(
+            Some(id),
+            ErrorCode::RunNotStarted,
+            "the run has not started",
+        ),
+        SubmitRejection::WrongState { expected, supplied } => wire::with_details(
+            wire::error(
+                Some(id),
+                ErrorCode::WrongState,
+                format!("submission targets {supplied}, but the current state is {expected}"),
+            ),
+            json!({ "expected": expected.0, "supplied": supplied.0 }),
+        ),
+    }
+}
+
+fn entry_result((agent, result): (agora_sim::AgentId, Result<(), EntryRejection>)) -> EntryResult {
+    let error = result.err().map(|rejection| {
+        let (code, message, details) = match rejection {
+            // Owned agents stay in the world while their session exists.
+            EntryRejection::NotOwned | EntryRejection::Sim(SubmitError::UnknownAgent(_)) => (
+                ErrorCode::AgentNotOwned,
+                format!("{agent} is not owned by this session"),
+                None,
+            ),
+            EntryRejection::Sim(error @ SubmitError::AlreadySubmitted(_)) => {
+                (ErrorCode::AlreadySubmitted, error.to_string(), None)
+            }
+            EntryRejection::Sim(
+                error @ SubmitError::AgentLimit(AgentLimitError::DistanceBudgetExceeded {
+                    distance,
+                    budget,
+                }),
+            ) => (
+                ErrorCode::DistanceBudgetExceeded,
+                error.to_string(),
+                Some(json!({ "distance": distance, "budget": budget })),
+            ),
+            // The run checks the phase and target state for the whole submission first.
+            EntryRejection::Sim(
+                error @ (SubmitError::NotStarted | SubmitError::WrongTargetState { .. }),
+            ) => unreachable!("checked for the whole submission: {error}"),
+        };
+        EntryError {
+            code,
+            message,
+            details: details.map(wire::object),
+        }
+    });
+    EntryResult {
+        agent_id: AgentId::new(agent.0).expect("agent IDs stay below 2^53"),
+        error,
     }
 }
 

@@ -6,9 +6,12 @@ mod common;
 use std::collections::HashSet;
 use std::time::Duration;
 
-use agora_protocol::{ErrorCode, Placement, RunPhase, ServerMessage};
+use agora_protocol::{Direction, ErrorCode, Placement, RunPhase, ServerMessage};
 use agora_server::ServerConfig;
-use common::{Client, cell, expect_code, start_default_server, start_server};
+use common::{
+    Client, cell, expect_code, expect_spawned, expect_submitted, start_default_server,
+    start_server, state, stay, step,
+};
 
 /// A timeout short enough for tests to wait out.
 const SHORT: Duration = Duration::from_millis(20);
@@ -182,8 +185,8 @@ async fn r07_joining_before_release_keeps_the_run() {
         matches!(reply, ServerMessage::RunJoined { .. }),
         "{reply:?}"
     );
-    // The expired session's agent is still in the world.
-    expect_code(rescuer.spawn(cell(4, 4)).await, ErrorCode::CellOccupied);
+    // The expired session's agent was removed, freeing its cell.
+    expect_spawned(rescuer.spawn(cell(4, 4)).await);
 }
 
 #[tokio::test]
@@ -203,4 +206,97 @@ async fn r07_a_connected_session_keeps_its_run() {
         matches!(reply, ServerMessage::RunJoined { .. }),
         "{reply:?}"
     );
+}
+
+#[tokio::test]
+async fn r03_only_an_agents_owner_can_submit_for_it() {
+    let address = start_default_server().await;
+    let (mut creator, run_id) = Client::with_new_run(address).await;
+    let mut joiner = Client::joined(address, &run_id).await;
+    let mine = expect_spawned(creator.spawn(Placement::Random).await);
+    creator.start().await;
+
+    let results = expect_submitted(joiner.submit(state(0), vec![stay(mine)]).await);
+
+    let error = results[0].error.as_ref().expect("the entry is rejected");
+    assert_eq!(error.code, ErrorCode::AgentNotOwned);
+    // The owner's action is still accepted.
+    let results = expect_submitted(creator.submit(state(0), vec![stay(mine)]).await);
+    assert_eq!(results[0].error, None);
+}
+
+#[tokio::test]
+async fn r08_r09_a_step_executes_once_every_agent_has_an_action() {
+    let address = start_default_server().await;
+    let (mut creator, run_id) = Client::with_new_run(address).await;
+    let mut joiner = Client::joined(address, &run_id).await;
+    let mut observer = Client::joined(address, &run_id).await;
+    let first = expect_spawned(creator.spawn(cell(0, 0)).await);
+    let second = expect_spawned(joiner.spawn(cell(5, 5)).await);
+    creator.start().await;
+    assert_eq!(creator.observations().await, (state(0), vec![first]));
+    assert_eq!(joiner.observations().await, (state(0), vec![second]));
+
+    creator
+        .submit(state(0), vec![step(first, Direction::North, 1)])
+        .await;
+    // A rejected entry does not count as an action.
+    joiner
+        .submit(state(0), vec![step(second, Direction::East, 2)])
+        .await;
+    creator.expect_silence(SETTLE).await;
+
+    joiner
+        .submit(state(0), vec![step(second, Direction::East, 1)])
+        .await;
+
+    // Each session receives only its own agents' observations.
+    assert_eq!(creator.observations().await, (state(1), vec![first]));
+    assert_eq!(joiner.observations().await, (state(1), vec![second]));
+    observer.expect_silence(SETTLE).await;
+    // Collection now targets state 1.
+    let results = expect_submitted(creator.submit(state(1), vec![stay(first)]).await);
+    assert_eq!(results[0].error, None);
+}
+
+#[tokio::test]
+async fn r06_an_expired_sessions_agents_are_removed_and_the_run_continues() {
+    let address = start_server(ServerConfig {
+        session_expiry: SHORT,
+        run_release: LONG,
+    })
+    .await;
+    let (mut creator, run_id) = Client::with_new_run(address).await;
+    let mut joiner = Client::joined(address, &run_id).await;
+    expect_spawned(creator.spawn(cell(0, 0)).await);
+    let survivor = expect_spawned(joiner.spawn(cell(5, 5)).await);
+    creator.start().await;
+    joiner.observations().await;
+    joiner.submit(state(0), vec![stay(survivor)]).await;
+
+    // The creator's agent never acts. Once its session expires, the agent is removed and the
+    // step executes without it.
+    creator.close().await;
+
+    assert_eq!(joiner.observations().await, (state(1), vec![survivor]));
+}
+
+#[tokio::test]
+async fn r07_a_run_waiting_for_actions_is_released() {
+    let address = start_server(ServerConfig {
+        session_expiry: SHORT,
+        run_release: SHORT,
+    })
+    .await;
+    let (mut creator, run_id) = Client::with_new_run(address).await;
+    let acted = expect_spawned(creator.spawn(Placement::Random).await);
+    expect_spawned(creator.spawn(Placement::Random).await);
+    creator.start().await;
+    creator.submit(state(0), vec![stay(acted)]).await;
+
+    creator.close().await;
+    tokio::time::sleep(SETTLE).await;
+
+    let mut late = Client::connect_with_hello(address).await;
+    expect_code(late.join_run(&run_id).await, ErrorCode::UnknownRun);
 }
