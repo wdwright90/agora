@@ -6,6 +6,16 @@ Checkpoint: 2026-09-27, chunk 1 (run lifecycle) open as #17 on branch `feature/r
 
 Check chunk 1's review comments with `gh pr view 17 --comments` and the inline comments through the GitHub API, and agree any changes before making them. Once it has merged, agree the scope of chunk 2 (registry and appearance) with the maintainer.
 
+## Preparing chunk 2 (registry and appearance)
+
+Not yet discussed with the maintainer; raise these when agreeing its scope:
+
+- **Where the registry lives:** kinds and appearances are data, so they may belong in the new data-only environment package planned for chunk 3, or chunk 2 may create that package early. `agora-sim` would depend on it, and the viewer should not need `agora-sim`.
+- **How kinds are defined:** Rust types (fixed at build time) or data loaded from definitions (so environments can add kinds without code). Behavior still needs Rust; appearance and simple properties could be data.
+- **Appearance in the stable view:** the viewer draws from appearance, so views probably carry each agent's and item's appearance, or a kind ID plus a registry the server publishes once. This is a protocol change.
+- **`Reflect`:** `Agent` and `Position` gain it (ADR-002); check which `bevy_ecs` feature provides it.
+- Keep the chunk small; terrain, food, and sight use the registry in chunks 3 to 5.
+
 ## Chunk 1
 
 Agreed scope (2026-09-27): `leave_run` and `close_run`; the `run_closed` push; closing a setup run when its creator expires (the SADD rule deferred since AGORA-004); sequential sessions per connection on the server; the Rust client keeps one session per connection (`leave` and `close` close it); the viewer's Close run button and closed state; the demo leaving cleanly. `agent_removed` moved to chunk 4.
