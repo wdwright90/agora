@@ -133,9 +133,21 @@ Future observations combine external senses and internal feelings, exposing only
 
 Conditions affecting an agent's ability to act must have associated perceptible feedback. Each condition and its perception require intentional joint design. Feedback may convey restraint without revealing a trap or the rule that movement is disabled. Observations contain only end-of-step state: transient experiences that begin and end within a step are deferred and may leave no observable trace.
 
-Distinguish configured normal capabilities, active effects, effective capabilities, and perceived condition. A naturally slow agent and a slowed agent with the same effective speed have different internal experiences: the latter perceives impairment relative to its baseline. Initially internal signals should be accurate but deliberately limited, translated rather than copied from simulation attributes. Concrete scales and schemas are not settled.
+Distinguish configured normal capabilities, active effects, effective capabilities, and perceived condition. A naturally slow agent and a slowed agent with the same effective speed have different internal experiences: the latter perceives impairment relative to its baseline. Initially internal signals should be accurate but deliberately limited. The aim is not to expose hidden simulation state; where a simulated quantity and the agent's perception naturally match, translating it directly is fine. Energy is such a case: agents perceive it at full precision, so they can learn that moving costs more than waiting. The long-term aim is a deep, immersive simulation in which feelings such as exertion, lack of sleep, and hunger stay distinct.
 
 Sense absence differs from an existing sense becoming impaired. Partial impairment also matters. Smoke can affect spatial visibility rather than simply reduce a global sight statistic. The sight model and internal feedback must be designed together; exact modeling remains open. Future noisy or misleading internal perception is deferred.
+
+## Second-milestone design
+
+The maintainer agreed this direction for the [second milestone](../../architecture/sadd.md#second-milestone-train-and-watch) on 2026-09-27. [AGORA-005](../../../work/AGORA-005-train-and-watch/context.md) records the reasoning and wire sketches; requirements are specified with each feature.
+
+**Metabolism and food.** An agent's metabolism is a capability set at spawn, with environment defaults: energy from 0 to 1, a per-step decay, an extra cost for moving, and a diet mapping food kinds to an efficiency (0 means inedible). Food items have a kind and a nutrition value, lie in cells without blocking movement, and at most one occupies a cell. An agent that ends its move on edible food eats it automatically, gaining nutrition times efficiency, capped at full; inedible items stay. At energy 0 the agent starves and is removed. The simulation keeps a per-agent record of what it ate for inspection, not perception. Agents without a metabolism ignore food.
+
+**Appearance registry.** Every kind (terrain, items, and creatures) is declared once in a registry with its appearance: hue and size as numbers from 0 to 1, so mimics can be close but slightly off, and shape as a class. Terrain has a class plus flags for blocking movement and blocking sight. Agents have a default appearance, and later species their own. The registry is the single source of truth for sight, the viewer's drawing, and future camera sight, following [ADR-002](../../decisions/0002-inspection-and-debug-visualization.md)'s ownership rule.
+
+**Sight.** A square window centred on the agent, north up, with its radius as a stat on the sight capability. Walls block line of sight. Each visible cell reports three slots: terrain (exactly one), item (at most one), and creature (at most one), and the agent sees itself at the centre. A hidden cell is unseen and reveals nothing. Cells beyond the grid's edge are walls. The observation is a structured grid in a fixed order declared by the capability; the client libraries' flattener turns it into model-ready arrays.
+
+**Later senses.** A facing cone is the next step (M4 in the [roadmap](../../roadmap.md)). Polar rays, reporting the nearest hit at fixed angles, are a candidate encoding to revisit with facing. Camera sight, which renders the agent's view as an image from the appearance registry, is a far-future sense kept outside the simulation core per ADR-001.
 
 ## Design constraints and rationale
 
