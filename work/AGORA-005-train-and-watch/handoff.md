@@ -1,10 +1,10 @@
 # Handoff
 
-Checkpoint: 2026-09-27, chunk 1 (run lifecycle) on branch `feature/run-lifecycle`, ready for review. The planning PR merged as #16.
+Checkpoint: 2026-09-27, chunk 1 (run lifecycle) open as #17 on branch `feature/run-lifecycle`. The planning PR merged as #16.
 
 ## Resume here
 
-Check chunk 1's review comments with `gh pr view <number> --comments` and the inline comments through the GitHub API, and agree any changes before making them. Once it has merged, agree the scope of chunk 2 (registry and appearance) with the maintainer.
+Check chunk 1's review comments with `gh pr view 17 --comments` and the inline comments through the GitHub API, and agree any changes before making them. Once it has merged, agree the scope of chunk 2 (registry and appearance) with the maintainer.
 
 ## Chunk 1
 
