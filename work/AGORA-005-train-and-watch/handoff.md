@@ -1,6 +1,6 @@
 # Handoff
 
-Checkpoint: 2026-09-27. Planning is done: the maintainer agreed the milestone's scope, design decisions, and chunk order ([context.md](context.md), [plan.md](plan.md)), and the [roadmap](../../docs/roadmap.md) orders later milestones. The planning documents are in review on branch `docs/milestone-2-plan`. No implementation has started.
+Checkpoint: 2026-09-27. Planning is done: the maintainer agreed the milestone's scope, design decisions, and chunk order ([context.md](context.md), [plan.md](plan.md)), and the [roadmap](../../docs/roadmap.md) orders later milestones. The planning documents are in review as #16 on branch `docs/milestone-2-plan`. No implementation has started.
 
 ## Resume here
 
