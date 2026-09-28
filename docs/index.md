@@ -14,6 +14,7 @@ Components are logical boundaries and can span multiple Rust crates or Python pa
 - [Rust workspace](../rust/README.md)
 - [Contributing](../CONTRIBUTING.md)
 - [AI development workflow](workflows/ai-development.md)
+- [Roadmap](roadmap.md)
 - [Active work](../work/index.md)
 - [Architecture decisions](decisions/README.md)
 - [Migration inventory](migration/inventory.md)
@@ -26,4 +27,4 @@ Design documents use `draft`, `accepted`, or `superseded`. Track implementation 
 
 Document IDs are stable and unique within each prefix: `SADD`, `CDD`, `SPEC`, and `ADR`. Use descriptive filenames; allocate the next unused ID when creating a document. Templates do not allocate IDs.
 
-The SADD currently captures the project purpose and high-level requirements in draft form; detailed architecture remains to be defined. [ADR-001](decisions/0001-rust-package-boundaries.md) (Rust package boundaries) and [ADR-002](decisions/0002-inspection-and-debug-visualization.md) (simulation inspection and debug visualization) are accepted. No component design, detailed spec, or product roadmap has been accepted yet.
+The SADD currently captures the project purpose and high-level requirements in draft form; detailed architecture remains to be defined. [ADR-001](decisions/0001-rust-package-boundaries.md) (Rust package boundaries) and [ADR-002](decisions/0002-inspection-and-debug-visualization.md) (simulation inspection and debug visualization) are accepted. The [roadmap](roadmap.md) orders the milestones. No component design or detailed spec has been accepted yet; they remain drafts that grow with each feature.

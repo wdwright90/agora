@@ -4,7 +4,7 @@ Substantial tasks use stable directories named `AGORA-NNN-short-name`. Allocate 
 
 ## Active work
 
-None. The next milestone will be defined as a new task.
+- [AGORA-005 — Train and watch (M2)](AGORA-005-train-and-watch/brief.md): planning agreed; implementation starts with chunk 1 (run lifecycle).
 
 ## Completed work
 
