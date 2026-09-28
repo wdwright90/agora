@@ -5,7 +5,8 @@
 use std::time::{Duration, Instant};
 
 use agora_client::protocol::{
-    Action, ActionEntry, Direction, ErrorCode, PacingMode, Placement, RunId, RunPhase, StateId,
+    Action, ActionEntry, Direction, ErrorCode, Pacing, PacingMode, Placement, RunId, RunPhase,
+    StateId,
 };
 use agora_client::{Client, Session};
 use agora_server::{ServerConfig, serve};
@@ -15,6 +16,7 @@ use agora_viewer::render::{AgentEntities, AgentMarker, Motion, cell_center};
 use agora_viewer::state::{Connection, NetworkLink, ViewerState};
 use bevy::prelude::*;
 use tokio::net::TcpListener;
+use tokio::sync::watch;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -38,6 +40,7 @@ struct Watching {
     creator: bool,
     mode: PacingMode,
     you_control: bool,
+    pacing: watch::Receiver<Option<Pacing>>,
     network: Network,
 }
 
@@ -52,12 +55,13 @@ async fn watching(url: &str, target: Target) -> Watching {
             pacing,
         } => {
             assert!(view.borrow().is_some(), "watching fills the view");
-            let pacing = pacing.borrow().expect("watching fills the pacing state");
+            let first = pacing.borrow().expect("watching fills the pacing state");
             Watching {
                 run_id: info.run_id,
                 creator,
-                mode: pacing.mode,
-                you_control: pacing.you_control,
+                mode: first.mode,
+                you_control: first.you_control,
+                pacing,
                 network,
             }
         }
@@ -153,7 +157,15 @@ async fn r01_creating_watches_the_new_run_and_claims_pacing() {
 
     assert!(created.creator);
     assert!(matches!(created.mode, PacingMode::Interval { .. }));
-    assert!(created.you_control);
+    // The claim's pacing update can arrive just after the bridge reports it is watching.
+    let mut pacing = created.pacing;
+    tokio::time::timeout(
+        TIMEOUT,
+        pacing.wait_for(|p| p.is_some_and(|p| p.you_control)),
+    )
+    .await
+    .expect("timed out waiting for pacing control")
+    .unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -250,4 +262,32 @@ fn r03_cells_are_centred_with_y_growing_north() {
     assert_eq!(south_west, -north_east);
     assert!(north_east.x > 0.0 && north_east.y > 0.0);
     assert!(cell_center(0, 1, size).y > south_west.y);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn r07_closing_ends_the_run_for_every_viewer() {
+    let url = start_server(ServerConfig::default()).await;
+    let mut creator = watching(&url, Target::Create).await;
+    let mut joined = watching(&url, Target::Join(creator.run_id.clone())).await;
+
+    joined.network.commands.send(Command::Close).unwrap();
+    match next_event(&mut joined.network).await {
+        NetworkEvent::CommandFailed { command, error } => {
+            assert_eq!(command, Command::Close);
+            assert!(error.contains(ErrorCode::NotCreator.as_str()), "{error}");
+        }
+        _ => panic!("expected the joined viewer's Close to fail"),
+    }
+
+    creator.network.commands.send(Command::Close).unwrap();
+    match next_event(&mut creator.network).await {
+        NetworkEvent::Disconnected { reason } => assert_eq!(reason, "you closed the run"),
+        _ => panic!("expected the creator to be disconnected"),
+    }
+    match next_event(&mut joined.network).await {
+        NetworkEvent::Disconnected { reason } => {
+            assert!(reason.contains("closed by its creator"), "{reason}")
+        }
+        _ => panic!("expected the joined viewer to be disconnected"),
+    }
 }

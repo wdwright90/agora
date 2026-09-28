@@ -4,8 +4,9 @@
 mod common;
 
 use agora_protocol::{
-    AgentId, AgentView, ClientMessage, Direction, ErrorCode, IntervalMs, PROTOCOL_VERSION, Pacing,
-    PacingMode, Placement, ProtocolVersion, RunId, RunPhase, ServerMessage, StateId, View,
+    AgentId, AgentView, ClientMessage, CloseReason, Direction, ErrorCode, IntervalMs,
+    PROTOCOL_VERSION, Pacing, PacingMode, Placement, ProtocolVersion, RunId, RunPhase,
+    ServerMessage, StateId, View,
 };
 use agora_server::RETAINED_RESULTS;
 use common::{
@@ -725,4 +726,58 @@ async fn r13_pacing_requests_report_their_errors() {
     );
     expect_code(second.step_once().await, ErrorCode::NotPacingController);
     expect_code(first.step_once().await, ErrorCode::RunNotPaused);
+}
+
+#[tokio::test]
+async fn r14_leaving_ends_the_session_and_the_connection_can_start_another() {
+    let address = start_default_server().await;
+    let (mut client, run_id) = Client::with_new_run(address).await;
+    let mut other = Client::joined(address, &run_id).await;
+
+    let reply = other.leave_run().await;
+    assert!(matches!(reply, ServerMessage::Left { .. }), "{reply:?}");
+
+    // The session has ended: run requests, including a retried leave, have no session.
+    expect_code(other.spawn(Placement::Random).await, ErrorCode::NoSession);
+    expect_code(other.leave_run().await, ErrorCode::NoSession);
+    // The same connection can establish another session.
+    let reply = other.join_run(&run_id).await;
+    assert!(
+        matches!(reply, ServerMessage::RunJoined { .. }),
+        "{reply:?}"
+    );
+    let reply = client.spawn(Placement::Random).await;
+    assert!(matches!(reply, ServerMessage::Spawned { .. }), "{reply:?}");
+}
+
+#[tokio::test]
+async fn r14_only_the_creator_can_close_the_run() {
+    let address = start_default_server().await;
+    let (mut creator, run_id) = Client::with_new_run(address).await;
+    let mut joiner = Client::joined(address, &run_id).await;
+
+    expect_code(joiner.close_run().await, ErrorCode::NotCreator);
+
+    let reply = creator.close_run().await;
+    assert!(matches!(reply, ServerMessage::Closed { .. }), "{reply:?}");
+    expect_code(creator.start().await, ErrorCode::NoSession);
+}
+
+#[tokio::test]
+async fn r15_run_closed_names_the_reason_and_ends_the_session() {
+    let address = start_default_server().await;
+    let (mut creator, run_id) = Client::with_new_run(address).await;
+    let mut joiner = Client::joined(address, &run_id).await;
+
+    creator.close_run().await;
+
+    assert_eq!(
+        joiner.receive().await,
+        ServerMessage::RunClosed {
+            reason: CloseReason::ClosedByCreator
+        }
+    );
+    expect_code(joiner.spawn(Placement::Random).await, ErrorCode::NoSession);
+    // The connection can create a run of its own.
+    joiner.create_run().await;
 }

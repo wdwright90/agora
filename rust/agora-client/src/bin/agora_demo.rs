@@ -170,7 +170,8 @@ async fn move_randomly(
         let state = batch.state_id.get();
         info!(state, "observed");
         if steps.is_some_and(|steps| state >= steps) {
-            return Ok(());
+            // Leave cleanly, so the run does not wait for this session to expire.
+            return session.leave().await;
         }
         let actions = batch
             .observations
@@ -189,5 +190,7 @@ async fn move_randomly(
             }
         }
     }
-    Err(ClientError::Closed)
+    Err(session
+        .closed_reason()
+        .map_or(ClientError::Closed, ClientError::RunClosed))
 }

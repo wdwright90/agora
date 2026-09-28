@@ -3,15 +3,16 @@
 use std::sync::{Arc, Mutex, PoisonError};
 
 use agora_protocol::{
-    ActionEntry, AgentId, CatalogEntryId, ClientMessage, EntryResult, PROTOCOL_VERSION, Pacing,
-    PacingMode, Placement, RequestId, RunId, RunPhase, ServerMessage, SessionId, StateId, View,
+    ActionEntry, AgentId, CatalogEntryId, ClientMessage, CloseReason, EntryResult,
+    PROTOCOL_VERSION, Pacing, PacingMode, Placement, RequestId, RunId, RunPhase, ServerMessage,
+    SessionId, StateId, View,
 };
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 
-use crate::connection::{self, ObservationBatch, Outgoing, Pushes, Socket};
+use crate::connection::{self, ClosedReason, ObservationBatch, Outgoing, Pushes, Socket};
 use crate::error::ClientError;
 
 /// A connection that has completed the version handshake but has no session yet.
@@ -65,6 +66,7 @@ impl Client {
         let (observations_sender, observations) = mpsc::unbounded_channel();
         let (view_sender, view) = watch::channel(None);
         let (pacing_sender, pacing) = watch::channel(None);
+        let closed = ClosedReason::default();
         tokio::spawn(connection::run(
             self.socket,
             receiver,
@@ -72,11 +74,13 @@ impl Client {
                 observations: observations_sender,
                 view: view_sender,
                 pacing: pacing_sender,
+                closed: closed.clone(),
             },
         ));
         let requests = Requests {
             next: Mutex::new(1),
             sender: requests,
+            closed,
         };
         let info = match requests.call(request).await? {
             ServerMessage::RunCreated {
@@ -232,6 +236,35 @@ impl Session {
         .await
     }
 
+    /// Leave the run: the session ends and its agents are removed. The connection then
+    /// closes, and every clone's later requests fail with [`ClientError::Closed`].
+    pub async fn leave(&self) -> Result<(), ClientError> {
+        self.expect_ok(
+            |request_id| ClientMessage::LeaveRun { request_id },
+            |m| matches!(m, ServerMessage::Left { .. }),
+        )
+        .await
+    }
+
+    /// Close the run for every session. Creator only. The connection then closes.
+    pub async fn close(&self) -> Result<(), ClientError> {
+        self.expect_ok(
+            |request_id| ClientMessage::CloseRun { request_id },
+            |m| matches!(m, ServerMessage::Closed { .. }),
+        )
+        .await
+    }
+
+    /// Why the server closed the run, if it has. Requests then fail with
+    /// [`ClientError::RunClosed`], and the observation stream ends.
+    pub fn closed_reason(&self) -> Option<CloseReason> {
+        *self
+            .requests
+            .closed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
     /// A handle to the newest view. It is `None` until the session watches.
     pub fn view(&self) -> watch::Receiver<Option<View>> {
         self.view.clone()
@@ -284,6 +317,7 @@ struct Requests {
     /// several tasks send at once.
     next: Mutex<u64>,
     sender: mpsc::UnboundedSender<Outgoing>,
+    closed: ClosedReason,
 }
 
 impl Requests {
@@ -302,10 +336,18 @@ impl Requests {
                     message: request(id),
                     reply,
                 })
-                .map_err(|_| ClientError::Closed)?;
+                .map_err(|_| self.closed_error())?;
             *next += 1;
         }
-        response.await.map_err(|_| ClientError::Closed)?
+        response.await.map_err(|_| self.closed_error())?
+    }
+
+    /// The error for a request the connection could not answer.
+    fn closed_error(&self) -> ClientError {
+        match *self.closed.lock().unwrap_or_else(PoisonError::into_inner) {
+            Some(reason) => ClientError::RunClosed(reason),
+            None => ClientError::Closed,
+        }
     }
 }
 

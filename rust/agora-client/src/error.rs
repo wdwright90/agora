@@ -1,6 +1,6 @@
 //! Client errors.
 
-use agora_protocol::{ErrorCode, ErrorResponse, ServerMessage};
+use agora_protocol::{CloseReason, ErrorCode, ErrorResponse, ServerMessage};
 use thiserror::Error;
 use tokio_tungstenite::tungstenite;
 
@@ -16,6 +16,9 @@ pub enum ClientError {
     /// The connection closed before the response arrived.
     #[error("the connection is closed")]
     Closed,
+    /// The run was closed, ending the session.
+    #[error("the run was closed: {0:?}")]
+    RunClosed(CloseReason),
     /// The server sent a message this client cannot read.
     #[error("unreadable server message: {0}")]
     Unreadable(#[from] serde_json::Error),

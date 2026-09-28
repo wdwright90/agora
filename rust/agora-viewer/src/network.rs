@@ -3,7 +3,7 @@
 //! [`NetworkEvent`]s over channels; the view and pacing latest-value handles arrive once the
 //! session is established and are read directly each frame.
 
-use agora_client::protocol::{CatalogEntryId, Pacing, PacingMode, RunId, View};
+use agora_client::protocol::{CatalogEntryId, CloseReason, Pacing, PacingMode, RunId, View};
 use agora_client::{Client, ClientError, Session, SessionInfo};
 use tokio::sync::{mpsc, watch};
 use tracing::{info, warn};
@@ -27,6 +27,8 @@ pub enum Command {
     ClaimPacing,
     SetPacing(PacingMode),
     StepOnce,
+    /// Close the run for everyone. Creator only.
+    Close,
 }
 
 /// What the network thread reports to Bevy.
@@ -107,19 +109,30 @@ async fn run(
             command = commands.recv() => {
                 // Bevy has exited.
                 let Some(command) = command else { return };
-                if let Err(error) = execute(&session, command).await {
-                    warn!(?command, %error, "command failed");
-                    let _ = events.send(NetworkEvent::CommandFailed {
-                        command,
-                        error: error.to_string(),
-                    });
+                match execute(&session, command).await {
+                    Ok(()) if command == Command::Close => {
+                        let _ = events.send(NetworkEvent::Disconnected {
+                            reason: "you closed the run".into(),
+                        });
+                        return;
+                    }
+                    Ok(()) => {}
+                    Err(error) => {
+                        warn!(?command, %error, "command failed");
+                        let _ = events.send(NetworkEvent::CommandFailed {
+                            command,
+                            error: error.to_string(),
+                        });
+                    }
                 }
             }
             // The view handle closes when the connection does.
             changed = closed.changed() => if changed.is_err() {
-                let _ = events.send(NetworkEvent::Disconnected {
-                    reason: "the connection closed".into(),
-                });
+                let reason = match session.closed_reason() {
+                    Some(reason) => format!("the run was closed ({})", describe_close(reason)),
+                    None => "the connection closed".into(),
+                };
+                let _ = events.send(NetworkEvent::Disconnected { reason });
                 return;
             },
         }
@@ -146,5 +159,15 @@ async fn execute(session: &Session, command: Command) -> Result<(), ClientError>
         Command::ClaimPacing => session.claim_pacing().await,
         Command::SetPacing(mode) => session.set_pacing(mode).await,
         Command::StepOnce => session.step_once().await,
+        Command::Close => session.close().await,
+    }
+}
+
+fn describe_close(reason: CloseReason) -> &'static str {
+    match reason {
+        CloseReason::ClosedByCreator => "closed by its creator",
+        CloseReason::CreatorExpired => "its creator disconnected before starting it",
+        CloseReason::CreatorLeft => "its creator left before starting it",
+        CloseReason::Other => "for a reason this viewer does not know",
     }
 }

@@ -88,6 +88,9 @@ fn r01_r08_valid_server_fixtures_round_trip_and_cover_every_type() {
             "pacing_set",
             "step_granted",
             "pacing_update",
+            "left",
+            "closed",
+            "run_closed",
             "error"
         ])
     );
@@ -137,7 +140,7 @@ fn r05_versions_parse_as_semver_core() {
     ] {
         assert!(bad.parse::<ProtocolVersion>().is_err(), "{bad:?}");
     }
-    assert_eq!(PROTOCOL_VERSION.to_string(), "0.4.0");
+    assert_eq!(PROTOCOL_VERSION.to_string(), "0.5.0");
 }
 
 #[test]
@@ -145,10 +148,10 @@ fn r06_mvp_compatibility_requires_an_exact_match() {
     let v = PROTOCOL_VERSION;
     assert!(v.is_compatible_with(v));
     for other in [
-        ProtocolVersion::new(0, 3, 0),
-        ProtocolVersion::new(0, 4, 1),
-        ProtocolVersion::new(0, 5, 0),
-        ProtocolVersion::new(1, 4, 0),
+        ProtocolVersion::new(0, 4, 0),
+        ProtocolVersion::new(0, 5, 1),
+        ProtocolVersion::new(0, 6, 0),
+        ProtocolVersion::new(1, 5, 0),
     ] {
         assert!(!v.is_compatible_with(other), "{other}");
     }
@@ -190,6 +193,18 @@ fn r09_agent_limit_codes_carry_their_prefix() {
     assert_eq!(
         ErrorCode::DistanceBudgetExceeded.as_str(),
         "agent_limit.distance_budget_exceeded"
+    );
+}
+
+#[test]
+fn r15_unknown_close_reasons_are_read_as_other() {
+    let text = r#"{ "type": "run_closed", "reason": "server_shutdown" }"#;
+    let message: ServerMessage = serde_json::from_str(text).unwrap();
+    assert_eq!(
+        message,
+        ServerMessage::RunClosed {
+            reason: agora_protocol::CloseReason::Other
+        }
     );
 }
 

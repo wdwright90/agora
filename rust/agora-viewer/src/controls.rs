@@ -18,14 +18,18 @@ pub struct Controls {
     pub step: bool,
     /// Set the interval or unlimited pacing: the controller.
     pub pacing: bool,
+    /// Close the run for everyone: the creator, while watching.
+    pub close: bool,
 }
 
 pub fn controls(creator: bool, view: Option<&View>, pacing: Option<&Pacing>) -> Controls {
     let start = creator
         && view.is_some_and(|view| view.phase == RunPhase::Setup && !view.agents.is_empty());
+    let close = creator && view.is_some();
     let Some(pacing) = pacing else {
         return Controls {
             start,
+            close,
             ..Controls::default()
         };
     };
@@ -38,6 +42,7 @@ pub fn controls(creator: bool, view: Option<&View>, pacing: Option<&Pacing>) -> 
         resume: controller && paused,
         step: controller && paused,
         pacing: controller,
+        close,
     }
 }
 
@@ -81,6 +86,14 @@ mod tests {
         assert!(!controls(true, Some(&view(RunPhase::Setup, 0)), None).start);
         assert!(!controls(true, Some(&view(RunPhase::Started, 1)), None).start);
         assert!(!controls(true, None, None).start);
+    }
+
+    #[test]
+    fn r05_closing_needs_the_creator() {
+        let setup = view(RunPhase::Setup, 0);
+        assert!(controls(true, Some(&setup), None).close);
+        assert!(!controls(false, Some(&setup), None).close);
+        assert!(!controls(true, None, None).close);
     }
 
     #[test]

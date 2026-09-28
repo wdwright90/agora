@@ -7,7 +7,8 @@ use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 use agora_protocol::{
-    Direction, ErrorCode, IntervalMs, Pacing, PacingMode, Placement, RunPhase, ServerMessage,
+    CloseReason, Direction, ErrorCode, IntervalMs, Pacing, PacingMode, Placement, RunPhase,
+    ServerMessage,
 };
 use agora_server::ServerConfig;
 use common::{
@@ -179,6 +180,8 @@ async fn r07_joining_before_release_keeps_the_run() {
     .await;
     let (mut creator, run_id) = Client::with_new_run(address).await;
     creator.spawn(cell(4, 4)).await;
+    // Started, so the creator's expiry does not close the run (R06).
+    creator.start().await;
 
     creator.close().await;
     tokio::time::sleep(SETTLE).await;
@@ -190,8 +193,8 @@ async fn r07_joining_before_release_keeps_the_run() {
         matches!(reply, ServerMessage::RunJoined { .. }),
         "{reply:?}"
     );
-    // The expired session's agent was removed, freeing its cell.
-    expect_spawned(rescuer.spawn(cell(4, 4)).await);
+    // The expired session's agent was removed.
+    assert!(rescuer.watch().await.agents.is_empty());
 }
 
 #[tokio::test]
@@ -515,4 +518,115 @@ async fn r14_an_interval_change_applies_to_a_held_step() {
     // The previous step started long enough ago for the new interval.
     viewer.set_pacing(interval(1)).await;
     assert_eq!(player.observations().await, (state(2), vec![agent]));
+}
+
+#[tokio::test]
+async fn r15_leaving_removes_agents_and_a_waiting_step_executes() {
+    let address = start_default_server().await;
+    let (mut creator, run_id) = Client::with_new_run(address).await;
+    let mut leaver = Client::joined(address, &run_id).await;
+    let staying = expect_spawned(creator.spawn(cell(0, 0)).await);
+    expect_spawned(leaver.spawn(cell(5, 5)).await);
+    creator.start().await;
+    creator.observations().await;
+    creator.submit(state(0), vec![stay(staying)]).await;
+
+    leaver.leave_run().await;
+
+    assert_eq!(creator.observations().await, (state(1), vec![staying]));
+}
+
+#[tokio::test]
+async fn r15_the_last_session_leaving_releases_the_run_at_once() {
+    let address = start_server(ServerConfig {
+        run_release: LONG,
+        ..ServerConfig::default()
+    })
+    .await;
+    let (mut creator, run_id) = Client::with_new_run(address).await;
+    creator.spawn(Placement::Random).await;
+    creator.start().await;
+
+    creator.leave_run().await;
+
+    let mut late = Client::connect_with_hello(address).await;
+    expect_code(late.join_run(&run_id).await, ErrorCode::UnknownRun);
+}
+
+#[tokio::test]
+async fn r15_a_creator_leaving_setup_closes_the_run() {
+    let address = start_default_server().await;
+    let (mut creator, run_id) = Client::with_new_run(address).await;
+    let mut joiner = Client::joined(address, &run_id).await;
+
+    creator.leave_run().await;
+
+    assert_eq!(
+        joiner.receive().await,
+        ServerMessage::RunClosed {
+            reason: CloseReason::CreatorLeft
+        }
+    );
+    let mut late = Client::connect_with_hello(address).await;
+    expect_code(late.join_run(&run_id).await, ErrorCode::UnknownRun);
+}
+
+#[tokio::test]
+async fn r15_a_controller_leaving_hands_over_pacing_control() {
+    let address = start_default_server().await;
+    let (_creator, run_id) = Client::with_new_run(address).await;
+    let mut controller = Client::joined(address, &run_id).await;
+    let mut successor = Client::joined(address, &run_id).await;
+    controller.watch_and_control().await;
+    successor.watch().await;
+
+    controller.leave_run().await;
+
+    assert!(successor.pacing_update().await.you_control);
+}
+
+#[tokio::test]
+async fn r16_closing_notifies_every_session_and_releases_the_run() {
+    let address = start_default_server().await;
+    let (mut creator, run_id) = Client::with_new_run(address).await;
+    let mut first = Client::joined(address, &run_id).await;
+    let mut second = Client::joined(address, &run_id).await;
+    creator.spawn(Placement::Random).await;
+    creator.start().await;
+
+    creator.close_run().await;
+
+    for client in [&mut first, &mut second] {
+        assert_eq!(
+            client.receive().await,
+            ServerMessage::RunClosed {
+                reason: CloseReason::ClosedByCreator
+            }
+        );
+    }
+    let mut late = Client::connect_with_hello(address).await;
+    expect_code(late.join_run(&run_id).await, ErrorCode::UnknownRun);
+}
+
+#[tokio::test]
+async fn r06_a_creator_expiring_in_setup_closes_the_run() {
+    let address = start_server(ServerConfig {
+        session_expiry: SHORT,
+        run_release: LONG,
+        ..ServerConfig::default()
+    })
+    .await;
+    let (creator, run_id) = Client::with_new_run(address).await;
+    let mut joiner = Client::joined(address, &run_id).await;
+
+    creator.close().await;
+
+    assert_eq!(
+        joiner.receive().await,
+        ServerMessage::RunClosed {
+            reason: CloseReason::CreatorExpired
+        }
+    );
+    let mut late = Client::connect_with_hello(address).await;
+    expect_code(late.join_run(&run_id).await, ErrorCode::UnknownRun);
 }

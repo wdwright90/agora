@@ -34,6 +34,7 @@ The executable takes `--server` (default `ws://127.0.0.1:7878`) and exactly one 
 - **Startup:** the bridge connects, creates or joins, watches, and claims pacing control. A claim refused because another viewer holds control is ignored; the viewer still watches. Any other failure reports the viewer as disconnected.
 - **Each frame:** the state system takes new events and latest values. When the view changed, the render system syncs the grid and agents: new agent IDs get an entity with a colour derived from the ID and an ID label, known agents are retargeted to their new cell, and agents no longer in the view are despawned. Motion eases each agent to its target.
 - **Controls:** buttons send commands through the bridge. The server's answer shows up in the next view or pacing state; a rejection shows as a message in the panel.
+- **Closing the run:** the creator's Close run button closes the run for everyone. The bridge then reports the viewer as disconnected, and a joined viewer shows the server's reason when its run is closed.
 - **Shutdown:** closing the window drops the bridge's command channel, and the network thread ends, closing the connection.
 
 ## Design constraints and rationale

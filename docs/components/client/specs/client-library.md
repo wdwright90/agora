@@ -40,13 +40,18 @@ Session recovery and retries are not covered; the server does not support recove
 
 - **SPEC-004-R07:** When the connection closes, requests still waiting for a response, and requests made afterwards, fail with a closed-connection error. The observation stream ends after delivering any batches already received.
 
+### Leaving and closing
+
+- **SPEC-004-R09:** `Session::leave` ends the session and returns once the server confirms. The connection then closes: every clone's later requests fail with a closed-connection error, and the observation stream ends.
+- **SPEC-004-R10:** `Session::close` closes the run for every session; the server's rejection (`not_creator`) is returned as a rejection. When the server closes the run, `Session::closed_reason` reports the reason, the observation stream ends, and requests fail with a run-closed error carrying the reason.
+
 ### Demo client
 
 - **SPEC-004-R08:** `agora-demo` takes the server URL, a number of agents to spawn (default 1), an optional seed, and an optional step limit, followed by a command:
   - `create [--start-at M] [--unlimited]` creates a run on `empty-grid-10x10`, prints the run ID as the first line of standard output, and spawns its agents. It watches the run and starts it once the view shows M agents in total (default: its own agent count). With `--unlimited`, it claims pacing control and sets unlimited pacing before starting.
   - `join <RUN_ID>` joins the run and spawns its agents.
 
-  The executable is built with the `demo` feature, which is on by default. After that, for each observation batch it submits one random cardinal step of distance 1 for every agent in the batch. It exits successfully once it observes the step limit's state, or when interrupted, and with a failure status on any client error. Logs go to standard error.
+  The executable is built with the `demo` feature, which is on by default. After that, for each observation batch it submits one random cardinal step of distance 1 for every agent in the batch. It leaves the run and exits successfully once it observes the step limit's state, or when interrupted, and with a failure status on any client error. Logs go to standard error.
 
 ## Acceptance criteria and verification
 
@@ -61,4 +66,6 @@ Library tests are in `rust/agora-client/tests/client_library.rs`. Most run again
 | R05 | In a task of its own, the stream delivers five steps' observations for states 0 to 4, each with the session's agent. | `r05_*` |
 | R06 | Handles are empty before watching, hold the view and pacing state after it, and follow later spawns and a pacing change. | `r06_*` |
 | R07 | After the fake server drops the connection, the waiting request, the stream, and a later request all report the closure. | `r07_*` |
+| R09 | A session that leaves fails later requests as closed, the other session carries on, and the stream ends after its own leave. | `r09_*` |
+| R10 | A joiner's close is rejected with `not_creator`; after the creator closes, the joiner's stream ends, its closed reason is `closed_by_creator`, and its requests fail with that reason. | `r10_*` |
 | R08 | A `create --start-at 2 --unlimited` process and a `join` process, each with one agent and a 3-step limit, both exit successfully. | `r08_*` |
