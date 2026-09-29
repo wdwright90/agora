@@ -112,6 +112,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "agora-env"
+version = "0.1.0"
+dependencies = [
+ "bevy_reflect",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "agora-protocol"
 version = "0.1.0"
 dependencies = [
@@ -124,6 +132,7 @@ dependencies = [
 name = "agora-server"
 version = "0.1.0"
 dependencies = [
+ "agora-env",
  "agora-protocol",
  "agora-sim",
  "clap",
@@ -141,7 +150,9 @@ dependencies = [
 name = "agora-sim"
 version = "0.1.0"
 dependencies = [
+ "agora-env",
  "bevy_ecs",
+ "bevy_reflect",
  "rand",
  "rand_chacha",
  "thiserror 2.0.21",

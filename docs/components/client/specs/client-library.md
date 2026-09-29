@@ -35,6 +35,7 @@ Session recovery and retries are not covered; the server does not support recove
 
 - **SPEC-004-R05:** Observation batches are delivered through the observation stream in the order the server sent them, each with its state ID and the session's agents' observations. The stream can be read in one task while other tasks make requests through clones of the session.
 - **SPEC-004-R06:** The view and pacing state are held in latest-value handles. Both are empty until the session watches. The `watching` response fills them before `watch` returns, and each `view_update` and `pacing_update` replaces them.
+- **SPEC-004-R11:** `Session::kinds` returns the run's kinds once the session has watched, and nothing before. The `watching` response sets them before `watch` returns, for every clone of the session. They do not change afterwards.
 
 ### Connection loss
 
@@ -65,6 +66,7 @@ Library tests are in `rust/agora-client/tests/client_library.rs`. Most run again
 | R04 | Start without agents and a spawn on an occupied cell return their codes; spawn, Start, and submit return their results. | `r04_*` |
 | R05 | In a task of its own, the stream delivers five steps' observations for states 0 to 4, each with the session's agent. | `r05_*` |
 | R06 | Handles are empty before watching, hold the view and pacing state after it, and follow later spawns and a pacing change. | `r06_*` |
+| R11 | Kinds are absent before watching; after `watch`, a clone of the session returns the built-in kinds in order. | `r11_*` |
 | R07 | After the fake server drops the connection, the waiting request, the stream, and a later request all report the closure. | `r07_*` |
 | R09 | A session that leaves fails later requests as closed, the other session carries on, and the stream ends after its own leave. | `r09_*` |
 | R10 | A joiner's close is rejected with `not_creator`; after the creator closes, the joiner's stream ends, its closed reason is `closed_by_creator`, and its requests fail with that reason. | `r10_*` |

@@ -4,7 +4,7 @@
 mod common;
 
 use agora_protocol::{
-    AgentId, AgentView, ClientMessage, CloseReason, Direction, ErrorCode, IntervalMs,
+    AgentId, AgentView, ClientMessage, CloseReason, Direction, ErrorCode, IntervalMs, KindId,
     PROTOCOL_VERSION, Pacing, PacingMode, Placement, ProtocolVersion, RunId, RunPhase,
     ServerMessage, StateId, View,
 };
@@ -17,6 +17,10 @@ use serde_json::json;
 
 fn agent(n: u64) -> AgentId {
     AgentId::new(n).unwrap()
+}
+
+fn agent_kind() -> KindId {
+    KindId::new("agent").unwrap()
 }
 
 #[tokio::test]
@@ -635,10 +639,33 @@ async fn r12_watching_returns_the_current_view() {
             height: 10,
             agents: vec![AgentView {
                 agent_id: first,
+                kind: agent_kind(),
                 x: 0,
                 y: 9
             }],
         }
+    );
+}
+
+#[tokio::test]
+async fn r12_watching_carries_the_run_kinds() {
+    let address = start_default_server().await;
+    let (mut client, _) = Client::with_new_run(address).await;
+
+    let (_, _, kinds) = client.watch_with_kinds().await;
+
+    assert_eq!(
+        serde_json::to_value(kinds).unwrap(),
+        json!([
+            { "category": "terrain", "kind": "floor", "class": "floor",
+              "blocks_movement": false, "blocks_sight": false },
+            { "category": "terrain", "kind": "wall", "class": "wall",
+              "blocks_movement": true, "blocks_sight": true },
+            { "category": "item", "kind": "berry",
+              "appearance": { "hue": 0.02, "size": 0.3, "shape": "round" } },
+            { "category": "creature", "kind": "agent",
+              "appearance": { "hue": 0.6, "size": 0.5, "shape": "agent" } },
+        ])
     );
 }
 
@@ -667,6 +694,7 @@ async fn r12_viewers_receive_a_view_after_each_change() {
         view.agents,
         [AgentView {
             agent_id: first,
+            kind: agent_kind(),
             x: 5,
             y: 4
         }]

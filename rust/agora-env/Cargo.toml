@@ -1,0 +1,16 @@
+[package]
+name = "agora-env"
+version = "0.1.0"
+description = "Data-only Agora environment definitions: registered kinds and their appearance."
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[features]
+# Derives `bevy_reflect::Reflect` on types that simulation components hold, for inspection
+# (ADR-002). Off by default so tools can use this package without Bevy.
+reflect = ["dep:bevy_reflect"]
+
+[dependencies]
+bevy_reflect = { workspace = true, optional = true }
+thiserror.workspace = true

@@ -2,6 +2,8 @@
 
 use thiserror::Error;
 
+use agora_env::KindId;
+
 use crate::types::{AgentId, GridPos, StateId};
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -10,6 +12,10 @@ pub enum ConfigError {
     EmptyGrid { width: u32, height: u32 },
     #[error("grid dimensions {width} x {height} are too large")]
     GridTooLarge { width: u32, height: u32 },
+    #[error("agent kind {0} is not in the kind registry")]
+    UnknownAgentKind(KindId),
+    #[error("agent kind {0} is not a creature")]
+    AgentKindNotCreature(KindId),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]

@@ -1,5 +1,5 @@
 [workspace]
-members = ["agora-client", "agora-protocol", "agora-server", "agora-sim", "agora-viewer"]
+members = ["agora-client", "agora-env", "agora-protocol", "agora-server", "agora-sim", "agora-viewer"]
 resolver = "3"
 
 [workspace.package]
@@ -9,12 +9,14 @@ publish = false
 
 [workspace.dependencies]
 agora-client = { path = "agora-client", default-features = false }
+agora-env = { path = "agora-env" }
 agora-protocol = { path = "agora-protocol" }
 agora-server = { path = "agora-server" }
 agora-sim = { path = "agora-sim" }
 bevy = { version = "0.19.1", default-features = false, features = ["2d"] }
 bevy_ecs = "0.19.1"
 bevy_egui = "0.42.0"
+bevy_reflect = { version = "0.19.1", default-features = false, features = ["std"] }
 clap = { version = "4.6.7", features = ["derive"] }
 futures-util = { version = "0.3.34", default-features = false, features = ["sink", "std"] }
 rand = "0.10.3"

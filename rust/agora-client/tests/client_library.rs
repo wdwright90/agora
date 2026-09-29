@@ -235,6 +235,24 @@ async fn r06_view_and_pacing_handles_hold_the_newest_state() {
 }
 
 #[tokio::test]
+async fn r11_kinds_are_available_after_watching_and_shared_by_clones() {
+    let url = start_server().await;
+    let (viewer, _) = new_run(&url).await;
+    let clone = viewer.clone();
+    assert!(viewer.kinds().is_none());
+
+    viewer.watch().await.unwrap();
+
+    let ids: Vec<&str> = clone
+        .kinds()
+        .expect("kinds are set before watch returns")
+        .iter()
+        .map(|kind| kind.id().as_str())
+        .collect();
+    assert_eq!(ids, ["floor", "wall", "berry", "agent"]);
+}
+
+#[tokio::test]
 async fn r07_connection_loss_fails_requests_and_ends_observations() {
     let url = fake_server(
         ServerMessage::Welcome {

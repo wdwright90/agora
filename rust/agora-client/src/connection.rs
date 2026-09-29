@@ -3,10 +3,11 @@
 //! handles.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use agora_protocol::{
-    AgentObservation, ClientMessage, CloseReason, Pacing, RequestId, ServerMessage, StateId, View,
+    AgentObservation, ClientMessage, CloseReason, Kind, Pacing, RequestId, ServerMessage, StateId,
+    View,
 };
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::TcpStream;
@@ -37,9 +38,14 @@ pub struct Pushes {
     pub observations: mpsc::UnboundedSender<ObservationBatch>,
     pub view: watch::Sender<Option<View>>,
     pub pacing: watch::Sender<Option<Pacing>>,
+    /// The run's kinds, set by the first `watching` response.
+    pub kinds: Kinds,
     /// Set when the server closes the run, so later requests can report why.
     pub closed: ClosedReason,
 }
+
+/// The run's kinds, once the session has watched. They do not change during a run.
+pub type Kinds = Arc<OnceLock<Vec<Kind>>>;
 
 /// Why the server closed the session's run, once it has.
 pub type ClosedReason = Arc<Mutex<Option<CloseReason>>>;
@@ -137,8 +143,14 @@ fn dispatch(
             *pushes.closed.lock().unwrap_or_else(PoisonError::into_inner) = Some(*reason);
             return Session::Ended;
         }
-        ServerMessage::Watching { view, pacing, .. } => {
+        ServerMessage::Watching {
+            view,
+            pacing,
+            kinds,
+            ..
+        } => {
             // Fill the handles before the caller sees the response.
+            let _ = pushes.kinds.set(kinds.clone());
             pushes.view.send_replace(Some(view.clone()));
             pushes.pacing.send_replace(Some(*pacing));
             message.request_id()

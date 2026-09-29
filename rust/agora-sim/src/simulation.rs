@@ -1,8 +1,12 @@
 //! A single run's simulation world and its operations.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
+use agora_env::{KindId, KindRegistry, Look};
 use bevy_ecs::prelude::*;
+use bevy_ecs::reflect::{AppTypeRegistry, ReflectComponent};
+use bevy_reflect::Reflect;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
@@ -21,7 +25,7 @@ const SPAWN_STREAM: u64 = 1;
 const SHUFFLE_STREAM: u64 = 2;
 
 /// Configuration for creating a simulation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SimConfig {
     /// Grid width in cells.
     pub width: u32,
@@ -29,15 +33,35 @@ pub struct SimConfig {
     pub height: u32,
     /// Run seed from which all of the run's random streams are derived.
     pub seed: u64,
+    /// Every kind in the run (SPEC-006).
+    pub kinds: Arc<KindRegistry>,
+    /// The kind given to every spawned agent. It must be a creature in `kinds`.
+    pub agent_kind: KindId,
 }
 
+// Every component derives `Reflect` and is registered in `Simulation::new`, so inspection can
+// dump an entity's actual components (ADR-002).
+
 /// Identifies an agent entity; read by future ECS systems that iterate agents.
-#[derive(Component)]
-#[expect(dead_code, reason = "no system reads agent entities yet")]
+#[derive(Component, Reflect)]
+#[reflect(Component)]
 struct Agent(AgentId);
 
-#[derive(Component)]
+#[derive(Component, Reflect)]
+#[reflect(Component)]
 struct Position(GridPos);
+
+/// An entity's registered kind.
+#[derive(Component, Reflect)]
+#[reflect(Component)]
+struct Kind(KindId);
+
+/// The run's kind registry and the kind given to spawned agents.
+#[derive(Resource)]
+struct Kinds {
+    registry: Arc<KindRegistry>,
+    agent: KindId,
+}
 
 /// Bounded grid dimensions plus a cell-to-agent index.
 #[derive(Resource)]
@@ -111,6 +135,8 @@ impl Simulation {
             width,
             height,
             seed,
+            kinds,
+            agent_kind,
         } = config;
         if width == 0 || height == 0 {
             return Err(ConfigError::EmptyGrid { width, height });
@@ -118,8 +144,25 @@ impl Simulation {
         let cells = (width as usize)
             .checked_mul(height as usize)
             .ok_or(ConfigError::GridTooLarge { width, height })?;
+        match kinds.get(&agent_kind).map(|kind| kind.look) {
+            None => return Err(ConfigError::UnknownAgentKind(agent_kind)),
+            Some(Look::Creature(_)) => {}
+            Some(_) => return Err(ConfigError::AgentKindNotCreature(agent_kind)),
+        }
 
         let mut world = World::new();
+        let types = AppTypeRegistry::default();
+        {
+            let mut types = types.write();
+            types.register::<Agent>();
+            types.register::<Position>();
+            types.register::<Kind>();
+        }
+        world.insert_resource(types);
+        world.insert_resource(Kinds {
+            registry: kinds,
+            agent: agent_kind,
+        });
         world.insert_resource(Grid {
             width,
             height,
@@ -179,7 +222,8 @@ impl Simulation {
             grid.occupancy[index] = Some(id);
             grid.position(index)
         };
-        let entity = self.world.spawn((Agent(id), Position(pos))).id();
+        let kind = Kind(self.world.resource::<Kinds>().agent.clone());
+        let entity = self.world.spawn((Agent(id), kind, Position(pos))).id();
         self.world.resource_mut::<Agents>().0.insert(id, entity);
         Ok(id)
     }
@@ -321,6 +365,12 @@ impl Simulation {
             .iter()
             .map(|(&id, &entity)| AgentView {
                 id,
+                kind: self
+                    .world
+                    .get::<Kind>(entity)
+                    .expect("agent entity has a kind")
+                    .0
+                    .clone(),
                 position: self.position(entity),
             })
             .collect();
@@ -330,6 +380,11 @@ impl Simulation {
             height: grid.height,
             agents,
         }
+    }
+
+    /// The run's kind registry.
+    pub fn kinds(&self) -> &Arc<KindRegistry> {
+        &self.world.resource::<Kinds>().registry
     }
 
     /// Number of agents currently in the world.
@@ -394,5 +449,47 @@ impl Simulation {
     fn shuffle(&mut self, order: &mut [AgentId]) {
         use rand::seq::SliceRandom;
         order.shuffle(&mut self.world.resource_mut::<RunRng>().shuffle);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::any::TypeId;
+
+    use super::*;
+
+    /// SPEC-001-R19: every component on an agent entity is registered for reflection.
+    #[test]
+    fn r19_agent_components_are_reflectable() {
+        let mut sim = Simulation::new(SimConfig {
+            width: 3,
+            height: 3,
+            seed: 0,
+            kinds: Arc::new(agora_env::builtin::registry()),
+            agent_kind: agora_env::builtin::agent_kind(),
+        })
+        .unwrap();
+        let agent = sim.spawn(Placement::Random).unwrap();
+        let entity = sim.world.resource::<Agents>().0[&agent];
+
+        let types = sim.world.resource::<AppTypeRegistry>().read();
+        let mut found: Vec<TypeId> = Vec::new();
+        for info in sim.world.inspect_entity(entity).unwrap() {
+            let type_id = info
+                .type_id()
+                .expect("simulation components are Rust types");
+            assert!(
+                types.get_type_data::<ReflectComponent>(type_id).is_some(),
+                "an agent component is not registered for reflection: {type_id:?}"
+            );
+            found.push(type_id);
+        }
+        for expected in [
+            TypeId::of::<Agent>(),
+            TypeId::of::<Kind>(),
+            TypeId::of::<Position>(),
+        ] {
+            assert!(found.contains(&expected));
+        }
     }
 }

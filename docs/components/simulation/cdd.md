@@ -3,7 +3,7 @@ id: CDD-001
 status: draft
 owner: maintainer
 parent: SADD-001
-packages: [agora-sim]
+packages: [agora-env, agora-sim]
 ---
 
 # Simulation — Component Design Description
@@ -12,11 +12,13 @@ packages: [agora-sim]
 
 The simulation owns a run's world state, participating agents, action collection and validation, sequential execution, environment effects, and perception generation. It follows the [SADD](../../architecture/sadd.md). Networking, connection authority, elapsed-time deadlines, pacing, and run cleanup belong to the server; rendering belongs to the viewer.
 
-This draft records lifecycle decisions discussed with the maintainer. Implemented behavior is specified in [SPEC-001](specs/lifecycle-and-movement.md). Rich capabilities and perception remain future design work beyond the empty-observation MVP.
+This draft records lifecycle decisions discussed with the maintainer. Implemented behavior is specified in [SPEC-001](specs/lifecycle-and-movement.md) and [SPEC-006](specs/kinds-and-appearance.md). Rich capabilities and perception remain future design work beyond the empty-observation MVP.
 
 ## Package mapping
 
 The `agora-sim` package (`rust/agora-sim`) implements this component using the Bevy ECS (`bevy_ecs`), without rendering or networking. For the MVP it does not depend on `agora-protocol`. It keeps its own types, and the server maps them to the [client protocol](../../contracts/client-protocol.md) (see the [package mapping](../../architecture/sadd.md#rust-package-mapping)).
+
+The `agora-env` package (`rust/agora-env`) holds the component's data: the kind registry now, and environment definitions later. It has no Bevy runtime types, so tools can use it without the simulation; its `reflect` feature, which `agora-sim` enables, derives `Reflect` on the types simulation components hold. `agora-sim` depends on it, and the server uses it to choose a catalog entry's kinds and to send them to viewers.
 
 ## Internal structure
 
@@ -143,7 +145,7 @@ The maintainer agreed this direction for the [second milestone](../../architectu
 
 **Metabolism and food.** An agent's metabolism is a capability set at spawn, with environment defaults: energy from 0 to 1, a per-step decay, an extra cost for moving, and a diet mapping food kinds to an efficiency (0 means inedible). Food items have a kind and a nutrition value, lie in cells without blocking movement, and at most one occupies a cell. An agent that ends its move on edible food eats it automatically, gaining nutrition times efficiency, capped at full; inedible items stay. At energy 0 the agent starves and is removed. The simulation keeps a per-agent record of what it ate for inspection, not perception. Agents without a metabolism ignore food.
 
-**Appearance registry.** Every kind (terrain, items, and creatures) is declared once in a registry with its appearance: hue and size as numbers from 0 to 1, so mimics can be close but slightly off, and shape as a class. Terrain has a class plus flags for blocking movement and blocking sight. Agents have a default appearance, and later species their own. The registry is the single source of truth for sight, the viewer's drawing, and future camera sight, following [ADR-002](../../decisions/0002-inspection-and-debug-visualization.md)'s ownership rule.
+**Appearance registry.** Every kind (terrain, items, and creatures) is declared once in a registry with its appearance: hue and size as numbers from 0 to 1, so mimics can be close but slightly off, and shape as a class. Terrain has a class plus flags for blocking movement and blocking sight. Agents have a default appearance, and later species their own. The registry is the single source of truth for sight, the viewer's drawing, and future camera sight, following [ADR-002](../../decisions/0002-inspection-and-debug-visualization.md)'s ownership rule. It is built ([SPEC-006](specs/kinds-and-appearance.md)): each agent carries a kind, views name it, and viewers receive the registry once when they start watching. Terrain, items, and sight start using it with their features.
 
 **Sight.** A square window centred on the agent, north up, with its radius as a stat on the sight capability. Walls block line of sight. Each visible cell reports three slots: terrain (exactly one), item (at most one), and creature (at most one), and the agent sees itself at the centre. A hidden cell is unseen and reveals nothing. Cells beyond the grid's edge are walls. The observation is a structured grid in a fixed order declared by the capability; the client libraries' flattener turns it into model-ready arrays.
 
@@ -159,7 +161,8 @@ External live edits are required eventually, but their admission and scheduling 
 
 ## Detailed specifications
 
-- [SPEC-001 — Simulation lifecycle and movement](specs/lifecycle-and-movement.md) (draft): grid creation, setup spawning, Start, submission, readiness, advancement with MVP moves, and viewer state.
+- [SPEC-001 — Simulation lifecycle and movement](specs/lifecycle-and-movement.md) (draft): grid creation, setup spawning, Start, submission, readiness, advancement with MVP moves, viewer state, and reflection of components.
+- [SPEC-006 — Kinds and appearance](specs/kinds-and-appearance.md) (draft): the kind registry and the built-in kinds.
 
 Specs should link canonical [shared contracts](../../contracts/README.md) rather than duplicate them. No message contracts have been written yet.
 

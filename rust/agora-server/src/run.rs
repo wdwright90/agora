@@ -7,9 +7,11 @@
 use std::collections::HashMap;
 use std::future;
 
+use agora_env::{KindRegistry, Look, TerrainClass};
 use agora_protocol::{
-    AgentObservation, AgentView, CatalogEntryId, CloseReason, IntervalMs, Observation, Pacing,
-    PacingMode, RunId, RunPhase, ServerMessage, SessionId, StateId, View,
+    AgentObservation, AgentView, Appearance, CatalogEntryId, CloseReason, IntervalMs, Kind, KindId,
+    Observation, Pacing, PacingMode, RunId, RunPhase, ServerMessage, SessionId, Shape, StateId,
+    Unit, View,
 };
 use agora_sim::{
     AgentId, Move, Observations, Placement, SimConfig, Simulation, SpawnError, Status, Submission,
@@ -35,6 +37,13 @@ pub type Outbox = mpsc::UnboundedSender<ServerMessage>;
 /// Where a run publishes views to a viewer's connection. It holds only the newest view, so a
 /// slow viewer skips states instead of queueing them.
 pub type ViewSlot = watch::Sender<Option<View>>;
+
+/// What a new viewer receives: the current view and pacing state, and the run's kinds.
+pub struct Watched {
+    pub view: View,
+    pub pacing: Pacing,
+    pub kinds: Vec<Kind>,
+}
 
 /// A connection's handle to a run's task.
 #[derive(Clone)]
@@ -103,7 +112,7 @@ enum Command {
         session: SessionId,
         connection: u64,
         slot: ViewSlot,
-        reply: oneshot::Sender<(View, Pacing)>,
+        reply: oneshot::Sender<Watched>,
     },
     ClaimPacing {
         session: SessionId,
@@ -184,13 +193,14 @@ impl RunHandle {
     }
 
     /// Make `session` a viewer that receives views through `slot`. `connection` orders viewers
-    /// by connection age for pacing handover. Returns the current view and pacing state.
+    /// by connection age for pacing handover. Returns the current view and pacing state, and
+    /// the run's kinds.
     pub async fn watch(
         &self,
         session: SessionId,
         connection: u64,
         slot: ViewSlot,
-    ) -> Result<(View, Pacing), RunGone> {
+    ) -> Result<Watched, RunGone> {
         self.call(|reply| Command::Watch {
             session,
             connection,
@@ -273,12 +283,15 @@ pub fn create(
 ) -> (RunId, RunHandle, SessionInfo) {
     let id = RunId::new(random_id()).expect("random IDs are non-empty");
     let seed = rand::random();
+    let kinds = wire_kinds(&entry.kinds);
     let sim = Simulation::new(SimConfig {
         width: entry.width,
         height: entry.height,
         seed,
+        kinds: entry.kinds,
+        agent_kind: entry.agent_kind,
     })
-    .expect("catalog entries have valid grid dimensions");
+    .expect("catalog entries have valid configurations");
     // The run outlives the connection that created it, so its span has no parent.
     let span = info_span!(parent: None, "run", %id);
     info!(parent: &span, %catalog_entry, seed, "run created");
@@ -287,6 +300,7 @@ pub fn create(
         id: id.clone(),
         catalog_entry,
         sim,
+        kinds,
         sessions: HashMap::new(),
         release_at: None,
         pacer: Pacer::new(default_interval(&config)),
@@ -306,6 +320,8 @@ struct Run {
     id: RunId,
     catalog_entry: CatalogEntryId,
     sim: Simulation,
+    /// The run's kind registry in wire form, sent to each new viewer.
+    kinds: Vec<Kind>,
     sessions: HashMap<SessionId, Session>,
     /// When the run is released. Set only while the run has no sessions.
     release_at: Option<Instant>,
@@ -409,7 +425,11 @@ impl Run {
                     self.pacer.viewers_arrived();
                     info!("first viewer arrived; pacing reset to the default interval");
                 }
-                let _ = reply.send((self.view(), self.pacer.state_for(&session)));
+                let _ = reply.send(Watched {
+                    view: self.view(),
+                    pacing: self.pacer.state_for(&session),
+                    kinds: self.kinds.clone(),
+                });
             }
             Command::ClaimPacing { session, reply } => {
                 let result = if self.session_mut(&session).viewer.is_none() {
@@ -658,6 +678,7 @@ impl Run {
                 .map(|agent| AgentView {
                     agent_id: agora_protocol::AgentId::new(agent.id.0)
                         .expect("agent IDs stay below 2^53"),
+                    kind: wire_kind_id(&agent.kind),
                     x: agent.position.x,
                     y: agent.position.y,
                 })
@@ -805,4 +826,49 @@ async fn sleep_until_some(deadline: Option<Instant>) {
 /// A random 128-bit identifier in hexadecimal. Run and session IDs are opaque to clients.
 fn random_id() -> String {
     format!("{:032x}", rand::random::<u128>())
+}
+
+/// The kind registry in wire form, in declaration order.
+fn wire_kinds(registry: &KindRegistry) -> Vec<Kind> {
+    registry
+        .iter()
+        .map(|kind| {
+            let id = wire_kind_id(&kind.id);
+            match kind.look {
+                Look::Terrain(terrain) => Kind::Terrain {
+                    kind: id,
+                    class: match terrain.class {
+                        TerrainClass::Floor => agora_protocol::TerrainClass::Floor,
+                        TerrainClass::Wall => agora_protocol::TerrainClass::Wall,
+                    },
+                    blocks_movement: terrain.blocks_movement,
+                    blocks_sight: terrain.blocks_sight,
+                },
+                Look::Item(appearance) => Kind::Item {
+                    kind: id,
+                    appearance: wire_appearance(appearance),
+                },
+                Look::Creature(appearance) => Kind::Creature {
+                    kind: id,
+                    appearance: wire_appearance(appearance),
+                },
+            }
+        })
+        .collect()
+}
+
+fn wire_appearance(appearance: agora_env::Appearance) -> Appearance {
+    let unit = |value: agora_env::Unit| Unit::new(value.get()).expect("units are from 0 to 1");
+    Appearance {
+        hue: unit(appearance.hue),
+        size: unit(appearance.size),
+        shape: match appearance.shape {
+            agora_env::Shape::Agent => Shape::Agent,
+            agora_env::Shape::Round => Shape::Round,
+        },
+    }
+}
+
+fn wire_kind_id(id: &agora_env::KindId) -> KindId {
+    KindId::new(id.as_str()).expect("kind IDs are non-empty")
 }
