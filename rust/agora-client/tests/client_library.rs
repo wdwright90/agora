@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use agora_client::protocol::{
-    Action, ActionEntry, AgentId, CatalogEntryId, Direction, ErrorCode, ErrorResponse,
+    Action, ActionEntry, AgentId, CatalogEntryId, CloseReason, Direction, ErrorCode, ErrorResponse,
     PROTOCOL_VERSION, PacingMode, Placement, RunId, RunPhase, ServerMessage, SessionId, StateId,
 };
 use agora_client::{Client, ClientError, Observations, Session};
@@ -262,4 +262,50 @@ async fn r07_connection_loss_fails_requests_and_ends_observations() {
     assert_eq!(batch, None);
     let error = session.start().await.err().unwrap();
     assert!(matches!(error, ClientError::Closed), "{error:?}");
+}
+
+#[tokio::test]
+async fn r09_leaving_ends_the_session_and_its_stream() {
+    let url = start_server().await;
+    let (session, mut observations) = new_run(&url).await;
+    let other = join(&url, &session.info().run_id).await;
+
+    other.leave().await.unwrap();
+
+    let error = other.spawn(Placement::Random).await.err().unwrap();
+    assert!(matches!(error, ClientError::Closed), "{error:?}");
+    // The run is unaffected for the session that stayed.
+    session.spawn(Placement::Random).await.unwrap();
+    session.leave().await.unwrap();
+    let ended = tokio::time::timeout(TIMEOUT, observations.next())
+        .await
+        .expect("timed out waiting for the stream to end");
+    assert_eq!(ended, None);
+}
+
+#[tokio::test]
+async fn r10_a_closed_run_reports_its_reason() {
+    let url = start_server().await;
+    let (creator, _) = new_run(&url).await;
+    let (joiner, mut observations) = Client::connect(&url)
+        .await
+        .unwrap()
+        .join_run(creator.info().run_id.clone())
+        .await
+        .unwrap();
+    let error = joiner.close().await.err().unwrap();
+    assert_eq!(error.code(), Some(&ErrorCode::NotCreator));
+
+    creator.close().await.unwrap();
+
+    let ended = tokio::time::timeout(TIMEOUT, observations.next())
+        .await
+        .expect("timed out waiting for the stream to end");
+    assert_eq!(ended, None);
+    assert_eq!(joiner.closed_reason(), Some(CloseReason::ClosedByCreator));
+    let error = joiner.spawn(Placement::Random).await.err().unwrap();
+    assert!(
+        matches!(error, ClientError::RunClosed(CloseReason::ClosedByCreator)),
+        "{error:?}"
+    );
 }

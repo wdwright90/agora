@@ -1,13 +1,51 @@
 # Handoff
 
-Checkpoint: 2026-09-27. Planning is done: the maintainer agreed the milestone's scope, design decisions, and chunk order ([context.md](context.md), [plan.md](plan.md)), and the [roadmap](../../docs/roadmap.md) orders later milestones. The planning documents are in review as #16 on branch `docs/milestone-2-plan`. No implementation has started.
+Checkpoint: 2026-09-27, chunk 1 (run lifecycle) open as #17 on branch `feature/run-lifecycle`. The planning PR merged as #16.
 
 ## Resume here
 
-Once the planning PR has merged, agree the scope of chunk 1 (run lifecycle: `leave_run`, `close_run`, the `run_closed` and `agent_removed` pushes, and sequential sessions per connection) with the maintainer, then implement it on a branch off `develop`.
+Check chunk 1's review comments with `gh pr view 17 --comments` and the inline comments through the GitHub API, and agree any changes before making them. Once it has merged, agree the scope of chunk 2 (registry and appearance) with the maintainer.
+
+## Preparing chunk 2 (registry and appearance)
+
+Not yet discussed with the maintainer; raise these when agreeing its scope:
+
+- **Where the registry lives:** kinds and appearances are data, so they may belong in the new data-only environment package planned for chunk 3, or chunk 2 may create that package early. `agora-sim` would depend on it, and the viewer should not need `agora-sim`.
+- **How kinds are defined:** Rust types (fixed at build time) or data loaded from definitions (so environments can add kinds without code). Behavior still needs Rust; appearance and simple properties could be data.
+- **Appearance in the stable view:** the viewer draws from appearance, so views probably carry each agent's and item's appearance, or a kind ID plus a registry the server publishes once. This is a protocol change.
+- **`Reflect`:** `Agent` and `Position` gain it (ADR-002); check which `bevy_ecs` feature provides it.
+- Keep the chunk small; terrain, food, and sight use the registry in chunks 3 to 5.
+
+## Chunk 1
+
+Agreed scope (2026-09-27): `leave_run` and `close_run`; the `run_closed` push; closing a setup run when its creator expires (the SADD rule deferred since AGORA-004); sequential sessions per connection on the server; the Rust client keeps one session per connection (`leave` and `close` close it); the viewer's Close run button and closed state; the demo leaving cleanly. `agent_removed` moved to chunk 4.
+
+Choices made in chunk 1, open to review:
+
+- A creator who **leaves** during setup also closes the run (reason `creator_left`), for the same reason as expiry: the run could never start.
+- `run_closed` reasons are `closed_by_creator`, `creator_expired`, and `creator_left`; unknown reasons are read as a generic `Other`.
+- Before `left` or `closed`, the server sends whatever the run already queued for the session (observations, pacing updates, and a pending view), so nothing from the old run arrives after the session ends.
+- `Session::leave` and `Session::close` take `&self`, like the other requests, and end the session for every clone.
+
+Contents:
+
+- `agora-protocol` 0.5.0: `leave_run`, `close_run`, `left`, `closed`, `run_closed`, and `CloseReason`; fixtures.
+- `agora-server`: leave and close in the run task with immediate release, closure on creator expiry or leave in setup, and the connection returning to no session.
+- `agora-client`: `Session::leave`, `Session::close`, `Session::closed_reason`, and `ClientError::RunClosed`; the demo leaves at its step limit.
+- `agora-viewer`: the Close run button and closure messages.
+- Specs: SPEC-002-R14 and R15; SPEC-003-R06 (no longer interim), R15, and R16; SPEC-004-R09 and R10; SPEC-005-R07. CDD-002, CDD-003, and CDD-004 updated.
+
+Verification, in `rust/`:
+
+- `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo doc --no-deps --workspace` with `-D warnings`: all passed.
+- `cargo test --workspace`: 135 passed (35 agora-sim, 13 agora-protocol, 66 agora-server, 11 agora-client, 10 agora-viewer), in 3 consecutive full runs; the server, client, and viewer tests also passed 8 consecutive runs.
+- A viewer test (`r01_creating_watches_the_new_run_and_claims_pacing`) failed once under full-workspace load: the pacing update from the bridge's claim can arrive just after the bridge reports it is watching. The viewer corrects itself on the next frame; the test now waits for the update. The race predates this chunk.
+- Manual run: two demo clients with a step limit both left, and the server released the run at once.
+- Architecture diagrams (added to this PR at the maintainer's request, 2026-09-28): [docs/architecture/rust-components.md](../../docs/architecture/rust-components.md) has Mermaid diagrams of package dependencies, runtime structure, and one step end to end, linked from the docs index and `rust/README.md`. All three were rendered from the committed file with `@mermaid-js/mermaid-cli`. The first push lost the runtime diagram's closing fence, which broke GitHub rendering; fixed in the follow-up commit.
 
 ## State
 
 - M1 is complete and in `main` ([AGORA-004](../AGORA-004-first-milestone/handoff.md) has its follow-ups, several of which are now scheduled in the roadmap).
 - Design decisions are recorded in the SADD's [second milestone](../../docs/architecture/sadd.md#second-milestone-train-and-watch) section and CDD-001, with the reasoning and wire sketches in [context.md](context.md).
 - `Agent` and `Position` in `agora-sim` still need `Reflect` (ADR-002); chunk 2 does it.
+- The planning PR merged as #16; M1 is in `main`.

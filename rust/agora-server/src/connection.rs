@@ -19,7 +19,8 @@ use crate::pacing::PacingRejection;
 use crate::registry::Registry;
 use crate::requests::{Admission, RequestLog};
 use crate::run::{
-    self, EntryRejection, Outbox, RunGone, RunHandle, StartRejection, SubmitRejection, ViewSlot,
+    self, EntryRejection, NotCreator, Outbox, RunGone, RunHandle, StartRejection, SubmitRejection,
+    ViewSlot,
 };
 use crate::wire;
 
@@ -64,15 +65,41 @@ pub async fn serve(stream: TcpStream, number: u64, registry: Registry, config: S
                 }
             },
             // The connection holds a sender for each channel, so neither closes.
-            Some(push) = pushes.recv() => Reply::send(push),
+            Some(push) = pushes.recv() => {
+                if matches!(push, ServerMessage::RunClosed { .. }) {
+                    // The run has ended this session; the connection may create or join again.
+                    connection.session = None;
+                }
+                Reply::send(push)
+            }
             Ok(()) = views.changed() => match views.borrow_and_update().clone() {
                 Some(view) => Reply::send(ServerMessage::ViewUpdate { view }),
                 None => continue,
             },
         };
-        let text = serde_json::to_string(&reply.message).expect("server messages serialize");
-        if let Err(e) = socket.send(Message::text(text)).await {
-            debug!(error = %e, "send failed");
+        if matches!(
+            reply.message,
+            ServerMessage::Left { .. } | ServerMessage::Closed { .. }
+        ) {
+            // Nothing more comes from the ended session's run, so send what it already queued
+            // before the response that ends the session.
+            let mut queued = Vec::new();
+            while let Ok(push) = pushes.try_recv() {
+                queued.push(push);
+            }
+            if views.has_changed().unwrap_or(false)
+                && let Some(view) = views.borrow_and_update().clone()
+            {
+                queued.push(ServerMessage::ViewUpdate { view });
+            }
+            if send(&mut socket, &queued).await.is_err() {
+                break;
+            }
+        }
+        if send(&mut socket, std::slice::from_ref(&reply.message))
+            .await
+            .is_err()
+        {
             break;
         }
         if reply.close {
@@ -84,6 +111,21 @@ pub async fn serve(stream: TcpStream, number: u64, registry: Registry, config: S
         session.run.disconnect(session.id).await;
     }
     info!("disconnected");
+}
+
+/// Send messages in order. Fails if the socket does.
+async fn send(
+    socket: &mut tokio_tungstenite::WebSocketStream<TcpStream>,
+    messages: &[ServerMessage],
+) -> Result<(), ()> {
+    for message in messages {
+        let text = serde_json::to_string(message).expect("server messages serialize");
+        if let Err(e) = socket.send(Message::text(text)).await {
+            debug!(error = %e, "send failed");
+            return Err(());
+        }
+    }
+    Ok(())
 }
 
 struct Connection {
@@ -187,7 +229,15 @@ impl Connection {
             Admission::Rejected(error) => ServerMessage::Error(error),
             Admission::New => {
                 let response = session.execute(id, &request).await;
-                session.requests.record(id, request, response.clone());
+                if matches!(
+                    response,
+                    ServerMessage::Left { .. } | ServerMessage::Closed { .. }
+                ) {
+                    // The session has ended, and its request log with it.
+                    self.session = None;
+                } else {
+                    session.requests.record(id, request, response.clone());
+                }
                 response
             }
         }
@@ -341,6 +391,24 @@ impl SessionLink {
                 self.run.step_once(self.id.clone()).await.map(|result| {
                     pacing_response(id, result, ServerMessage::StepGranted { request_id: id })
                 })
+            }
+            ClientMessage::LeaveRun { .. } => self
+                .run
+                .leave(self.id.clone())
+                .await
+                .map(|()| ServerMessage::Left { request_id: id }),
+            ClientMessage::CloseRun { .. } => {
+                self.run
+                    .close(self.id.clone())
+                    .await
+                    .map(|result| match result {
+                        Ok(()) => ServerMessage::Closed { request_id: id },
+                        Err(NotCreator) => ServerMessage::Error(wire::error(
+                            Some(id),
+                            ErrorCode::NotCreator,
+                            "only the run's creator can close it",
+                        )),
+                    })
             }
             ClientMessage::Hello { .. } => unreachable!("hello is not a request"),
         };

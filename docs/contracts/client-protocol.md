@@ -12,7 +12,7 @@ packages: [agora-protocol, agora-server, agora-client, agora-viewer]
 
 This contract is the canonical definition of the messages exchanged between the Agora server and its clients: the Rust client, the viewer, and later the Python client. It implements the SADD's [communication](../architecture/sadd.md#simulation-step-coordination), [error-response](../architecture/sadd.md#error-responses), and [run lifecycle](../architecture/sadd.md#run-lifecycle) rules.
 
-The contract grows feature by feature. Protocol version 0.4.0 currently covers:
+The contract grows feature by feature. Protocol version 0.5.0 currently covers:
 
 - message framing
 - the version handshake
@@ -22,12 +22,13 @@ The contract grows feature by feature. Protocol version 0.4.0 currently covers:
 - action submission and agent observations
 - watching a run's view
 - pacing controls
+- leaving and closing runs
 
-Session recovery and credentials are not yet defined. They are added as the features that use them are built. Version 0.2.0 added submission and observations, 0.3.0 added watching, and 0.4.0 added pacing.
+Session recovery and credentials are not yet defined. They are added as the features that use them are built. Version 0.2.0 added submission and observations, 0.3.0 added watching, 0.4.0 added pacing, and 0.5.0 added leaving and closing runs.
 
 ## Terminology and preconditions
 
-- **Connection:** one WebSocket connection. **Session:** the server's logical client session. A connection carries at most one session.
+- **Connection:** one WebSocket connection. **Session:** the server's logical client session. A connection carries at most one session at a time; after a session ends, the connection may establish another.
 - **Request:** a client message that receives exactly one final response.
 - **Response:** the server's success message for a request, or an `error` message.
 - **Push:** a server message that is not a response. It has no `request_id`.
@@ -62,7 +63,7 @@ Session recovery and credentials are not yet defined. They are added as the feat
   - Backward-compatible additions increase the minor version.
   - Clarifications and fixes that don't change messages increase the patch version.
 
-  The current version is **0.4.0**. Protocol versions are independent of capability versions.
+  The current version is **0.5.0**. Protocol versions are independent of capability versions.
 - **SPEC-002-R06:** *(MVP.)* The server accepts only a client version exactly equal to its own. Semver-based backward compatibility is intended from 1.0.0 onward: the same major version, with the server's minor version at least the client's. Defining that rule will require a change to this spec.
 
 ### Requests and sessions
@@ -91,7 +92,7 @@ Session recovery and credentials are not yet defined. They are added as the feat
 
   - `placement` is either `{"kind": "random"}`, meaning uniformly among unoccupied cells, or `{"kind": "cell", "x", "y"}`. On the wire, `(0, 0)` is the grid's south-west corner, `x` grows east, and `y` grows north.
   - A `create_run` or `join_run` on a connection that already has a session returns `session_already_established`.
-  - A `spawn` or `start` before a session exists returns `no_session`.
+  - A run-scoped request before a session exists, or after it has ended, returns `no_session`.
 
 ### Steps and observations
 
@@ -127,6 +128,11 @@ Session recovery and credentials are not yet defined. They are added as the feat
   | `step_once {request_id}` | `step_granted {request_id}` | `not_pacing_controller`, `run_not_paused` |
 
   `step_granted` confirms that one step may start; it does not wait for the step. The step's result arrives as a `view_update` once every agent is ready.
+
+### Leaving and closing
+
+- **SPEC-002-R14:** `leave_run {request_id}` ends the session; the response is `left {request_id}`. `close_run {request_id}` closes the run for every session; the response is `closed {request_id}`, and only the creator may send it (`not_creator` otherwise). After either response the connection has no session and may send `create_run` or `join_run` again, and a new session numbers its requests independently. Neither request can be retried once answered, because the session has ended; a retry returns `no_session`. Pushes the run queued for the session before it ended are sent before `left` or `closed`, and nothing from that run follows.
+- **SPEC-002-R15:** `run_closed {reason}` is a push telling a session that its run was closed and the session has ended; the connection may then create or join again. `reason` is `closed_by_creator`, `creator_expired`, or `creator_left`. Receivers treat an unknown reason as a generic closure.
 
 ### Errors
 
@@ -195,6 +201,7 @@ Rust tests are named by requirement ID. Message types are tested in `rust/agora-
 | R09 | Known codes map to their wire names, including the `agent_limit.` prefix, and unknown codes are preserved | `r09_*` |
 | R10 | An accepted entry has no `error` field | `r10_*` |
 | R12 | View fixtures round-trip; negative coordinates and a missing phase are rejected | `valid/`, `invalid/server/view_*` |
+| R14, R15 | Leave and close fixtures round-trip; `run_closed` without a reason is rejected; an unknown reason is read as a generic closure | `valid/`, `invalid/server/run_closed_missing_reason.json`, `r15_*` |
 | R13 | Pacing fixtures round-trip; intervals of 0 and over an hour, unknown modes, and `watching` without pacing are rejected | `valid/`, `invalid/client/set_pacing_*`, `invalid/server/watching_missing_pacing.json` |
 | R01 (server) | Unknown types report their type; invalid JSON, non-objects, missing fields, and binary frames are malformed, echoing any readable request ID | server `r01_*` |
 | R02 (server) | A request with an extra field succeeds | server `r02_*` |
@@ -206,6 +213,8 @@ Rust tests are named by requirement ID. Message types are tested in `rust/agora-
 | R11 (server) | `started` precedes the state-0 observations; the step-completing `submitted` precedes the state-1 observations | server `r11_*` |
 | R12 (server) | `watching` carries the current view; a viewer receives a view after a spawn, Start, and a step, with the moved position | server `r12_*` |
 | R13 (server) | `watching` carries the default pacing state; each pacing request gets its response and the changes are pushed; each error code is returned | server `r13_*` |
+| R14 (server) | `left` ends the session, later requests and a retried leave return `no_session`, and the connection can join again; a non-creator's close returns `not_creator`, and the creator's returns `closed` and ends its session | server `r14_*` |
+| R15 (server) | Other sessions receive `run_closed` with the reason, lose their session, and can create a new run | server `r15_*` |
 
 ## Open questions
 

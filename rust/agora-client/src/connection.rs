@@ -3,9 +3,10 @@
 //! handles.
 
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use agora_protocol::{
-    AgentObservation, ClientMessage, Pacing, RequestId, ServerMessage, StateId, View,
+    AgentObservation, ClientMessage, CloseReason, Pacing, RequestId, ServerMessage, StateId, View,
 };
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::TcpStream;
@@ -36,7 +37,12 @@ pub struct Pushes {
     pub observations: mpsc::UnboundedSender<ObservationBatch>,
     pub view: watch::Sender<Option<View>>,
     pub pacing: watch::Sender<Option<Pacing>>,
+    /// Set when the server closes the run, so later requests can report why.
+    pub closed: ClosedReason,
 }
+
+/// Why the server closed the session's run, once it has.
+pub type ClosedReason = Arc<Mutex<Option<CloseReason>>>;
 
 /// Run the connection until the socket closes or every session handle is dropped.
 pub async fn run(
@@ -68,7 +74,13 @@ pub async fn run(
             }
             frame = socket.next() => match frame {
                 Some(Ok(Message::Text(text))) => match serde_json::from_str(text.as_str()) {
-                    Ok(message) => dispatch(message, &mut pending, &pushes),
+                    Ok(message) => {
+                        if dispatch(message, &mut pending, &pushes) == Session::Ended {
+                            // The session is over; this library uses one session per connection.
+                            let _ = socket.close(None).await;
+                            break;
+                        }
+                    }
                     Err(e) => warn!(error = %e, "ignoring an unreadable server message"),
                 },
                 Some(Ok(Message::Close(_))) | None => break,
@@ -84,11 +96,23 @@ pub async fn run(
     // the observation stream.
 }
 
+/// Whether the session continues after a message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Session {
+    Continues,
+    /// The session left, closed its run, or had its run closed.
+    Ended,
+}
+
 fn dispatch(
     message: ServerMessage,
     pending: &mut HashMap<RequestId, oneshot::Sender<Result<ServerMessage, ClientError>>>,
     pushes: &Pushes,
-) {
+) -> Session {
+    let ends = matches!(
+        message,
+        ServerMessage::Left { .. } | ServerMessage::Closed { .. }
+    );
     let request_id = match &message {
         ServerMessage::Observations {
             state_id,
@@ -99,15 +123,19 @@ fn dispatch(
                 state_id: *state_id,
                 observations: observations.clone(),
             });
-            return;
+            return Session::Continues;
         }
         ServerMessage::ViewUpdate { view } => {
             pushes.view.send_replace(Some(view.clone()));
-            return;
+            return Session::Continues;
         }
         ServerMessage::PacingUpdate { pacing } => {
             pushes.pacing.send_replace(Some(*pacing));
-            return;
+            return Session::Continues;
+        }
+        ServerMessage::RunClosed { reason } => {
+            *pushes.closed.lock().unwrap_or_else(PoisonError::into_inner) = Some(*reason);
+            return Session::Ended;
         }
         ServerMessage::Watching { view, pacing, .. } => {
             // Fill the handles before the caller sees the response.
@@ -119,15 +147,20 @@ fn dispatch(
     };
     let Some(id) = request_id else {
         warn!(?message, "ignoring a server message without a request ID");
-        return;
+        return Session::Continues;
     };
     let Some(reply) = pending.remove(&id) else {
         warn!(%id, "ignoring a response to no pending request");
-        return;
+        return Session::Continues;
     };
     let result = match message {
         ServerMessage::Error(error) => Err(ClientError::Rejected(error)),
         message => Ok(message),
     };
     let _ = reply.send(result);
+    if ends {
+        Session::Ended
+    } else {
+        Session::Continues
+    }
 }

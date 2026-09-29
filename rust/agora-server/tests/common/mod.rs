@@ -342,6 +342,16 @@ impl Client {
             .await
     }
 
+    pub async fn leave_run(&mut self) -> ServerMessage {
+        let request_id = self.next_id();
+        self.exchange(&ClientMessage::LeaveRun { request_id }).await
+    }
+
+    pub async fn close_run(&mut self) -> ServerMessage {
+        let request_id = self.next_id();
+        self.exchange(&ClientMessage::CloseRun { request_id }).await
+    }
+
     pub async fn step_once(&mut self) -> ServerMessage {
         let request_id = self.next_id();
         self.exchange(&ClientMessage::StepOnce { request_id }).await

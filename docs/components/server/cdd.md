@@ -33,7 +33,7 @@ The `agora-server` package (`rust/agora-server`) implements this component as a 
 
 Clients use the [client protocol](../../contracts/client-protocol.md) (SPEC-002) over WebSocket. The executable takes the listen address and the two timeouts on its command line.
 
-Connection tasks talk to run tasks through a handle with asynchronous `join`, `spawn`, `start`, `submit`, `watch`, and `disconnect` operations. Run tasks push messages to sessions through their outboxes and publish views to viewers' slots. A handle to a released run fails, and the connection reports `unknown_run`.
+Connection tasks talk to run tasks through a handle with asynchronous `join`, `spawn`, `start`, `submit`, `watch`, `leave`, `close`, and `disconnect` operations. Run tasks push messages to sessions through their outboxes and publish views to viewers' slots. A handle to a released run fails, and the connection reports `unknown_run`.
 
 ## Data flow and lifecycle
 
@@ -46,7 +46,9 @@ Connection tasks talk to run tasks through a handle with asynchronous `join`, `s
 - **Watch and publish:** a watching session receives the current view in its response. After every spawn, Start, step, and expiry removal, the run task publishes the new view to each viewer's slot, replacing any view not yet sent.
 - **Disconnect:** when a connection closes, its session stays in the run without a connection, and its outbox and view slot are dropped. The session's expiry timer starts. If it held pacing control, control passes to the remaining viewer with the oldest connection. If it was the last viewer, pacing becomes unlimited and a waiting step executes.
 - **Session expiry:** when the timer fires, the session is removed and its agents are removed from the simulation. If the run was waiting only for those agents, the step executes.
-- **Run release:** when the run has no sessions left, its release timer starts. A join cancels it. When it fires, the run is removed from the registry and its task ends.
+- **Leave:** the session is removed at once, with its agents; pacing control passes on if needed, and a waiting step may execute. The connection sends anything the run already queued for the session, then `left`, and returns to having no session.
+- **Close:** the creator's close, a creator leaving setup, or a creator expiring in setup pushes `run_closed` to the other sessions and ends the run's task. A connection that receives `run_closed` returns to having no session.
+- **Run release:** when the run has no sessions left after expiry, its release timer starts, and a join cancels it. When the last session leaves, or the run is closed, it is released at once. On release the run is removed from the registry and its task ends, dropping its sessions' outboxes and view slots.
 
 Session recovery will let a client reattach a connection to its session before expiry, cancelling the timer. Until then, a disconnected session cannot be resumed.
 
@@ -70,7 +72,6 @@ Session recovery will let a client reattach a connection to its session before e
 
 ## Open questions
 
-- **Closing a setup run whose creator expires:** deferred until a closure message exists. Such a run can no longer start, and it is released once its remaining sessions expire.
 - **A connected client that stops submitting** holds its run's steps until deadlines and fallback control are built. Disconnecting ends the stall once the session expires.
 - **Retries of `create_run` and `join_run` after a lost response** need session recovery (see SPEC-002).
 - **Deadlines and fallback control** are designed in the SADD but not built.

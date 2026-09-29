@@ -37,7 +37,9 @@ Pushed messages reach the application in two forms:
 
 Callbacks were rejected because handlers would run inside the library's task, which fits poorly with async code and with Bevy. A single stream for all pushes was rejected because views would queue up behind a slow reader.
 
-Failures are `ClientError` values: a transport failure, a server rejection carrying the server's `ErrorResponse`, a closed connection, an unreadable message, or a response that does not fit the request.
+Failures are `ClientError` values: a transport failure, a server rejection carrying the server's `ErrorResponse`, a closed connection, a run closed by the server (with its reason), an unreadable message, or a response that does not fit the request.
+
+`Session::leave` and `Session::close` end the session; `Session::closed_reason` reports why the server closed the run, if it did. The server allows a connection to hold several sessions in turn, but this library keeps one session per connection: ending a session closes its connection, and the next episode connects again. Handing a connection back for reuse is awkward because sessions are cloned across tasks, and reconnecting locally takes milliseconds.
 
 ## Data flow and lifecycle
 
@@ -45,7 +47,7 @@ Failures are `ClientError` values: a transport failure, a server rejection carry
 - **Establish:** start the connection task, send `create_run` or `join_run` as request 1, and return the session, with the server's session information, and its observation stream.
 - **Request:** queue the request with the next number and a reply slot, then wait. The connection task writes it and, when the response arrives, completes the reply slot. A server `error` becomes `ClientError::Rejected`.
 - **Push:** `observations` go to the stream. `view_update` and `pacing_update` replace the latest values. A `watching` response fills both handles before the caller sees it.
-- **Close:** when the socket closes, waiting and later requests fail with `ClientError::Closed`, and the observation stream ends after any batches already received. Dropping every clone of the session closes the connection.
+- **Close:** when the session leaves or closes its run, or the server sends `run_closed`, the connection task closes the socket. When the socket closes for any reason, waiting and later requests fail, with `ClientError::RunClosed` if the server closed the run and `ClientError::Closed` otherwise, and the observation stream ends after any batches already received. Dropping every clone of the session also closes the connection.
 
 ## The demo client
 

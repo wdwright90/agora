@@ -15,8 +15,8 @@ pub use ids::{
     StateId,
 };
 pub use message::{
-    Action, ActionEntry, AgentObservation, AgentView, ClientMessage, Direction, EntryError,
-    EntryResult, Observation, Placement, RunPhase, ServerMessage, View,
+    Action, ActionEntry, AgentObservation, AgentView, ClientMessage, CloseReason, Direction,
+    EntryError, EntryResult, Observation, Placement, RunPhase, ServerMessage, View,
 };
 pub use pacing::{IntervalMs, Pacing, PacingMode};
 pub use version::{InvalidVersion, PROTOCOL_VERSION, ProtocolVersion};

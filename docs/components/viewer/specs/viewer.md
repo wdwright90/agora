@@ -22,7 +22,7 @@ This spec defines the observable behavior of the [viewer](../cdd.md): startup, c
 ### Startup and commands
 
 - **SPEC-005-R01:** `agora-viewer` takes a server URL and exactly one of `--create`, which creates a run on `empty-grid-10x10`, or `--join <RUN_ID>`, which joins an existing run. It then watches the run and tries to claim pacing control; if another viewer holds control, it keeps watching without it. If the server cannot be reached, or the connection closes, the panel shows the viewer as disconnected with the reason.
-- **SPEC-005-R02:** Start, claiming control, setting the pacing mode, and granting a step are sent to the server as the user chooses them. A rejected command is shown in the panel with the server's reason, and the viewer keeps running.
+- **SPEC-005-R02:** Start, claiming control, setting the pacing mode, granting a step, and closing the run are sent to the server as the user chooses them. A rejected command is shown in the panel with the server's reason, and the viewer keeps running.
 
 ### Drawing
 
@@ -36,6 +36,8 @@ This spec defines the observable behavior of the [viewer](../cdd.md): startup, c
   - Claim pacing control: offered while this viewer is not the controller.
   - Pause: the controller, while not paused. Resume and Step: the controller, while paused.
   - The interval slider (20 ms to 5 s) and Unlimited: the controller.
+  - Close run: the creator, once watching.
+- **SPEC-005-R07:** When the creator closes the run, the viewer shows that it closed the run. When the server closes the run for another reason, or for a joined viewer, the viewer shows the run as closed with the reason.
 - **SPEC-005-R06:** The panel shows the run ID with a button to copy it, the state ID and phase, the agent count, the pacing mode, and whether this viewer controls pacing.
 
 ## Acceptance criteria and verification
@@ -48,7 +50,8 @@ Unit tests for R05 are in `rust/agora-viewer/src/controls.rs`. The other tests a
 | R02 | A joined viewer's Start is reported as failed with `not_creator`; the creator's Start starts the run. | `r02_*` |
 | R03 | Two agents get entities at their cells; a move retargets an entity; an agent removed by session expiry loses its entity; cell centres are symmetric with `y` growing north. | `r03_*`, `r03_r04_*` |
 | R04 | The motion target follows the move. Easing timing and camera fit are checked by hand. | `r03_r04_*`, manual |
-| R05 | Start, claim, pause, resume, step, and pacing controls are enabled exactly as listed. | `r05_*` (unit) |
+| R05 | Start, claim, pause, resume, step, pacing, and close controls are enabled exactly as listed. | `r05_*` (unit) |
+| R07 | A joined viewer's Close is rejected with `not_creator`; the creator's Close reports "you closed the run", and the joined viewer reports the run closed by its creator. | `r07_*` |
 | R06 | Checked by hand. | manual |
 
 ### Manual check

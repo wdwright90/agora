@@ -85,6 +85,7 @@ fn describe(command: Command) -> &'static str {
         Command::ClaimPacing => "Claiming pacing control",
         Command::SetPacing(_) => "Changing pacing",
         Command::StepOnce => "Step",
+        Command::Close => "Closing the run",
     }
 }
 

@@ -125,6 +125,13 @@ pub fn panel(
                 send(Command::SetPacing(PacingMode::Unlimited));
             }
 
+            if enabled.close {
+                ui.separator();
+                if ui.button("Close run").clicked() {
+                    send(Command::Close);
+                }
+            }
+
             if let Some(message) = &state.message {
                 ui.separator();
                 ui.colored_label(egui::Color32::LIGHT_RED, message);

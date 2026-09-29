@@ -49,6 +49,11 @@ pub enum ClientMessage {
     },
     /// Allow one step while paused. Pacing controller only.
     StepOnce { request_id: RequestId },
+    /// End this session: its agents are removed, and the connection may then create or join
+    /// another run.
+    LeaveRun { request_id: RequestId },
+    /// Close the run for every session. Creator only.
+    CloseRun { request_id: RequestId },
 }
 
 impl ClientMessage {
@@ -65,6 +70,8 @@ impl ClientMessage {
         "claim_pacing",
         "set_pacing",
         "step_once",
+        "leave_run",
+        "close_run",
     ];
 
     /// The request ID, for every message except `hello`.
@@ -79,7 +86,9 @@ impl ClientMessage {
             | Self::Watch { request_id }
             | Self::ClaimPacing { request_id }
             | Self::SetPacing { request_id, .. }
-            | Self::StepOnce { request_id } => Some(*request_id),
+            | Self::StepOnce { request_id }
+            | Self::LeaveRun { request_id }
+            | Self::CloseRun { request_id } => Some(*request_id),
         }
     }
 }
@@ -144,6 +153,12 @@ pub enum ServerMessage {
     StepGranted { request_id: RequestId },
     /// Pushed by the server, not a response: the pacing mode or controller changed, for viewers.
     PacingUpdate { pacing: Pacing },
+    /// Successful `leave_run`: the session has ended.
+    Left { request_id: RequestId },
+    /// Successful `close_run`: the run is closed and released.
+    Closed { request_id: RequestId },
+    /// Pushed by the server, not a response: the run was closed, and this session has ended.
+    RunClosed { reason: CloseReason },
     /// Any failed request or rejected message.
     Error(ErrorResponse),
 }
@@ -161,12 +176,15 @@ impl ServerMessage {
             | Self::Watching { request_id, .. }
             | Self::PacingClaimed { request_id }
             | Self::PacingSet { request_id }
-            | Self::StepGranted { request_id } => Some(*request_id),
+            | Self::StepGranted { request_id }
+            | Self::Left { request_id }
+            | Self::Closed { request_id } => Some(*request_id),
             Self::Error(error) => error.request_id,
             Self::Welcome { .. }
             | Self::Observations { .. }
             | Self::ViewUpdate { .. }
-            | Self::PacingUpdate { .. } => None,
+            | Self::PacingUpdate { .. }
+            | Self::RunClosed { .. } => None,
         }
     }
 }
@@ -255,6 +273,21 @@ pub struct AgentView {
     pub agent_id: AgentId,
     pub x: u32,
     pub y: u32,
+}
+
+/// Why a run was closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CloseReason {
+    /// The creator sent `close_run`.
+    ClosedByCreator,
+    /// The creator's session expired while the run was still in setup, so it could never start.
+    CreatorExpired,
+    /// The creator left while the run was still in setup, so it could never start.
+    CreatorLeft,
+    /// A reason this version does not know.
+    #[serde(other)]
+    Other,
 }
 
 /// Run lifecycle phase.

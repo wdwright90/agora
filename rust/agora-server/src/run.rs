@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use std::future;
 
 use agora_protocol::{
-    AgentObservation, AgentView, CatalogEntryId, IntervalMs, Observation, Pacing, PacingMode,
-    RunId, RunPhase, ServerMessage, SessionId, StateId, View,
+    AgentObservation, AgentView, CatalogEntryId, CloseReason, IntervalMs, Observation, Pacing,
+    PacingMode, RunId, RunPhase, ServerMessage, SessionId, StateId, View,
 };
 use agora_sim::{
     AgentId, Move, Observations, Placement, SimConfig, Simulation, SpawnError, Status, Submission,
@@ -118,9 +118,28 @@ enum Command {
         session: SessionId,
         reply: oneshot::Sender<Result<(), PacingRejection>>,
     },
+    Leave {
+        session: SessionId,
+        reply: oneshot::Sender<()>,
+    },
+    Close {
+        session: SessionId,
+        reply: oneshot::Sender<Result<(), NotCreator>>,
+    },
     Disconnect {
         session: SessionId,
     },
+}
+
+/// A Close from a session without creator authority.
+pub struct NotCreator;
+
+/// Whether the run's task continues after a command or deadline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Flow {
+    Continue,
+    /// The run is released now.
+    Release,
 }
 
 impl RunHandle {
@@ -211,6 +230,16 @@ impl RunHandle {
     ) -> Result<Result<(), PacingRejection>, RunGone> {
         self.call(|reply| Command::StepOnce { session, reply })
             .await
+    }
+
+    /// End `session`, removing its agents.
+    pub async fn leave(&self, session: SessionId) -> Result<(), RunGone> {
+        self.call(|reply| Command::Leave { session, reply }).await
+    }
+
+    /// Close the run for every session, on behalf of `session`.
+    pub async fn close(&self, session: SessionId) -> Result<Result<(), NotCreator>, RunGone> {
+        self.call(|reply| Command::Close { session, reply }).await
     }
 
     /// Report that `session` lost its connection.
@@ -313,22 +342,25 @@ impl Run {
                 // Prefer commands, so a join that arrived before a deadline is handled first.
                 biased;
                 command = commands.recv() => match command {
-                    Some(command) => self.handle(command),
+                    Some(command) => if self.handle(command) == Flow::Release {
+                        break;
+                    },
                     // The registry keeps a sender until the run is released.
                     None => return,
                 },
                 () = sleep_until_some(deadline) => {
-                    if self.on_deadline(Instant::now()) {
-                        self.registry.remove(&self.id);
-                        info!("run released");
-                        return;
+                    if self.on_deadline(Instant::now()) == Flow::Release {
+                        break;
                     }
                 }
             }
         }
+        // Dropping the run drops its sessions' outboxes and view slots.
+        self.registry.remove(&self.id);
+        info!("run released");
     }
 
-    fn handle(&mut self, command: Command) {
+    fn handle(&mut self, command: Command) -> Flow {
         match command {
             Command::Join { outbox, reply } => {
                 let session = self.add_session(false, outbox);
@@ -420,6 +452,69 @@ impl Run {
                 if was_viewer {
                     self.viewer_left(&id);
                 }
+            }
+            Command::Leave { session, reply } => {
+                let flow = self.leave(&session);
+                let _ = reply.send(());
+                return flow;
+            }
+            Command::Close { session, reply } => {
+                if !self.session_mut(&session).creator {
+                    let _ = reply.send(Err(NotCreator));
+                    return Flow::Continue;
+                }
+                self.close(CloseReason::ClosedByCreator, Some(&session));
+                let _ = reply.send(Ok(()));
+                return Flow::Release;
+            }
+        }
+        Flow::Continue
+    }
+
+    /// End a session at its own request: remove its agents, hand over pacing control if it
+    /// held it, and let a step waiting only for its agents execute. A run left with no
+    /// sessions is released at once, and a setup run whose creator leaves is closed, because
+    /// it could never start.
+    fn leave(&mut self, id: &SessionId) -> Flow {
+        let session = self
+            .sessions
+            .remove(id)
+            .expect("a connected session has not expired");
+        for &agent in &session.agents {
+            self.sim
+                .remove(agent)
+                .expect("a session's agents are in the world");
+        }
+        info!(session = %id, agents = session.agents.len(), "session left");
+        if session.creator && self.phase() == RunPhase::Setup {
+            self.close(CloseReason::CreatorLeft, None);
+            return Flow::Release;
+        }
+        if self.sessions.is_empty() {
+            return Flow::Release;
+        }
+        if !session.agents.is_empty() {
+            self.publish_view();
+        }
+        if session.viewer.is_some() {
+            // Also advances a step the agents' removal made ready.
+            self.viewer_left(id);
+        } else {
+            self.advance_if_ready(Instant::now());
+        }
+        Flow::Continue
+    }
+
+    /// Tell every connected session except `initiator` that the run is closed. The caller
+    /// releases the run.
+    fn close(&self, reason: CloseReason, initiator: Option<&SessionId>) {
+        info!(?reason, "run closed");
+        for (id, session) in &self.sessions {
+            if Some(id) == initiator {
+                continue;
+            }
+            if let Some(outbox) = &session.outbox {
+                let _ = outbox.send(ServerMessage::RunClosed { reason });
             }
         }
     }
@@ -626,13 +721,14 @@ impl Run {
     /// Handle deadlines as of `now`: expire sessions, removing their agents; start a step the
     /// pacing interval held back; and start the release timer. Returns whether the run should be
     /// released.
-    fn on_deadline(&mut self, now: Instant) -> bool {
+    fn on_deadline(&mut self, now: Instant) -> Flow {
         let sim = &mut self.sim;
         let mut removed = false;
+        let mut creator_expired = false;
         self.sessions.retain(|id, session| {
             let expired = session.expires_at.is_some_and(|at| at <= now);
             if expired {
-                // Closing a run whose creator expires during setup waits for a closure message.
+                creator_expired |= session.creator;
                 for &agent in &session.agents {
                     sim.remove(agent)
                         .expect("a session's agents are in the world");
@@ -647,6 +743,11 @@ impl Run {
             }
             !expired
         });
+        // A setup run whose creator has expired can never start.
+        if creator_expired && self.phase() == RunPhase::Setup {
+            self.close(CloseReason::CreatorExpired, None);
+            return Flow::Release;
+        }
         if removed {
             self.publish_view();
         }
@@ -657,7 +758,11 @@ impl Run {
             self.release_at = Some(now + self.config.run_release);
             info!("run has no sessions; release timer started");
         }
-        self.release_at.is_some_and(|at| at <= now)
+        if self.release_at.is_some_and(|at| at <= now) {
+            Flow::Release
+        } else {
+            Flow::Continue
+        }
     }
 
     fn next_deadline(&self) -> Option<Instant> {
