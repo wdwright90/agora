@@ -3,6 +3,7 @@
 ## Design hierarchy
 
 1. [SADD](architecture/sadd.md): system structure, component responsibilities, dependencies, and cross-cutting constraints.
+   [How the Rust components fit together](architecture/rust-components.md) gives a visual overview.
 2. [Component design descriptions](components/README.md): high-level design of individual logical components.
 3. Component specs and [shared contracts](contracts/README.md): detailed, actionable requirements and acceptance criteria.
 4. Implementation and tests: packages will be introduced after their scope is defined.

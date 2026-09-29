@@ -1,6 +1,6 @@
 # Agora Rust workspace
 
-This directory is the Cargo workspace for the Rust simulation framework. The [SADD](../docs/architecture/sadd.md) owns system responsibilities, and the [package mapping](../docs/architecture/sadd.md#rust-package-mapping) (accepted in [ADR-001](../docs/decisions/0001-rust-package-boundaries.md)) defines the packages. Packages are added to `members` in `Cargo.toml` as features need them. [Component design descriptions](../docs/components/README.md) map components to packages, and shared message contracts belong in [docs/contracts](../docs/contracts/README.md).
+This directory is the Cargo workspace for the Rust simulation framework. [How the Rust components fit together](../docs/architecture/rust-components.md) diagrams the packages and how they interact at run time. The [SADD](../docs/architecture/sadd.md) owns system responsibilities, and the [package mapping](../docs/architecture/sadd.md#rust-package-mapping) (accepted in [ADR-001](../docs/decisions/0001-rust-package-boundaries.md)) defines the packages. Packages are added to `members` in `Cargo.toml` as features need them. [Component design descriptions](../docs/components/README.md) map components to packages, and shared message contracts belong in [docs/contracts](../docs/contracts/README.md).
 
 ## Packages
 
