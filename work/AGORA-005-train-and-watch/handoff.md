@@ -1,10 +1,10 @@
 # Handoff
 
-Checkpoint: 2026-09-28, chunk 2 (registry and appearance) implemented on branch `feature/registry`, not yet committed or opened as a PR. Chunk 1 merged as #17, with the Rust component diagrams ([docs/architecture/rust-components.md](../../docs/architecture/rust-components.md)).
+Checkpoint: 2026-09-28, chunk 2 (registry and appearance) open as #18 on branch `feature/registry`. Chunk 1 merged as #17, with the Rust component diagrams ([docs/architecture/rust-components.md](../../docs/architecture/rust-components.md)).
 
 ## Resume here
 
-Review the chunk 2 changes with the maintainer, then commit and open the PR against `develop`. After it merges, agree the scope of chunk 3 (environment definitions).
+Check #18's review comments with `gh pr view 18 --comments` and the inline comments through the GitHub API (`gh api repos/wdwright90/agora/pulls/18/comments`), and agree any changes before making them. Until #18 merges, this handoff is newer on `feature/registry` than on `develop`. Once it merges, update the plan's status column and the work index, then agree the scope of chunk 3 (environment definitions) using the notes below.
 
 ## Chunk 2
 
