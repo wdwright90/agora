@@ -41,7 +41,7 @@ Verification, in `rust/`:
 - `cargo test --workspace`: 135 passed (35 agora-sim, 13 agora-protocol, 66 agora-server, 11 agora-client, 10 agora-viewer), in 3 consecutive full runs; the server, client, and viewer tests also passed 8 consecutive runs.
 - A viewer test (`r01_creating_watches_the_new_run_and_claims_pacing`) failed once under full-workspace load: the pacing update from the bridge's claim can arrive just after the bridge reports it is watching. The viewer corrects itself on the next frame; the test now waits for the update. The race predates this chunk.
 - Manual run: two demo clients with a step limit both left, and the server released the run at once.
-- Architecture diagrams (added to this PR at the maintainer's request, 2026-09-28): [docs/architecture/rust-components.md](../../docs/architecture/rust-components.md) has Mermaid diagrams of package dependencies, runtime structure, and one step end to end, linked from the docs index and `rust/README.md`. All three were rendered with `@mermaid-js/mermaid-cli` to check the syntax and layout; not yet viewed on GitHub.
+- Architecture diagrams (added to this PR at the maintainer's request, 2026-09-28): [docs/architecture/rust-components.md](../../docs/architecture/rust-components.md) has Mermaid diagrams of package dependencies, runtime structure, and one step end to end, linked from the docs index and `rust/README.md`. All three were rendered from the committed file with `@mermaid-js/mermaid-cli`. The first push lost the runtime diagram's closing fence, which broke GitHub rendering; fixed in the follow-up commit.
 
 ## State
 

@@ -79,7 +79,7 @@ flowchart TB
     c1 <-->|WebSocket| conn1
     c2 <-->|WebSocket| conn2
     bridge <-->|WebSocket| conn3
-
+```
 
 - **Connection task** ([CDD-002](../components/server/cdd.md#internal-structure)): one per WebSocket. It performs the handshake, answers each request before reading the next, and forwards anything the run pushes. It holds at most one session at a time.
 - **Run task:** one per run, owning that run's `Simulation`. Connection tasks send it commands through a channel, so every call into the simulation is serialized, and separate runs never share an action barrier.
