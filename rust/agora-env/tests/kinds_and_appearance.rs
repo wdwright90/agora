@@ -28,6 +28,9 @@ fn r01_registry_keeps_declaration_order_and_finds_kinds() {
     assert_eq!(registry.len(), 3);
     assert_eq!(registry.get(&id("a")), Some(&floor("a")));
     assert_eq!(registry.get(&id("missing")), None);
+    assert_eq!(registry.index_of(&id("b")), Some(0));
+    assert_eq!(registry.index_of(&id("c")), Some(2));
+    assert_eq!(registry.index_of(&id("missing")), None);
 }
 
 #[test]

@@ -19,7 +19,7 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 use tracing::{Instrument, info_span, warn};
 
-pub use catalog::EMPTY_GRID_10X10;
+pub use catalog::{DIVIDED_10X10, EMPTY_GRID_10X10};
 pub use config::ServerConfig;
 pub use requests::RETAINED_RESULTS;
 

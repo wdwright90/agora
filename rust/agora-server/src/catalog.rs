@@ -1,30 +1,33 @@
-//! The bundled environment catalog (SPEC-003-R01).
+//! The bundled environment catalog (SPEC-003-R01), built from `agora-env`'s bundled
+//! definitions.
 
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
-use agora_env::{KindId, KindRegistry, builtin};
+use agora_env::{Environment, builtin, bundled};
 use agora_protocol::CatalogEntryId;
 
-/// ID of the only bundled entry: an empty 10 × 10 grid.
+/// An open 10 × 10 floor.
 pub const EMPTY_GRID_10X10: &str = "empty-grid-10x10";
+/// A 10 × 10 floor divided by a wall with a gap.
+pub const DIVIDED_10X10: &str = "divided-10x10";
 
-/// What a catalog entry builds.
-#[derive(Debug, Clone, PartialEq)]
-pub struct CatalogEntry {
-    pub width: u32,
-    pub height: u32,
-    /// Every kind in the run.
-    pub kinds: Arc<KindRegistry>,
-    /// The kind given to every agent.
-    pub agent_kind: KindId,
-}
+/// Every bundled environment, loaded once with the built-in kinds.
+static CATALOG: LazyLock<Vec<(&str, Environment)>> = LazyLock::new(|| {
+    let kinds = Arc::new(builtin::registry());
+    bundled::DEFINITIONS
+        .iter()
+        .map(|&(id, source)| {
+            let environment = Environment::from_toml(source, Arc::clone(&kinds))
+                .unwrap_or_else(|error| panic!("bundled environment {id} is invalid: {error}"));
+            (id, environment)
+        })
+        .collect()
+});
 
 /// Look up a catalog entry by ID.
-pub fn lookup(id: &CatalogEntryId) -> Option<CatalogEntry> {
-    (id.as_str() == EMPTY_GRID_10X10).then(|| CatalogEntry {
-        width: 10,
-        height: 10,
-        kinds: Arc::new(builtin::registry()),
-        agent_kind: builtin::agent_kind(),
-    })
+pub fn lookup(id: &CatalogEntryId) -> Option<Environment> {
+    CATALOG
+        .iter()
+        .find(|(entry, _)| *entry == id.as_str())
+        .map(|(_, environment)| environment.clone())
 }

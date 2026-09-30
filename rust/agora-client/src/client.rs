@@ -5,14 +5,16 @@ use std::sync::{Arc, Mutex, PoisonError};
 use agora_protocol::{
     ActionEntry, AgentId, CatalogEntryId, ClientMessage, CloseReason, EntryResult, Kind,
     PROTOCOL_VERSION, Pacing, PacingMode, Placement, RequestId, RunId, RunPhase, ServerMessage,
-    SessionId, StateId, View,
+    SessionId, StateId, View, Watching,
 };
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 
-use crate::connection::{self, ClosedReason, Kinds, ObservationBatch, Outgoing, Pushes, Socket};
+use crate::connection::{
+    self, ClosedReason, ObservationBatch, Outgoing, Pushes, Socket, WatchedRun,
+};
 use crate::error::ClientError;
 
 /// A connection that has completed the version handshake but has no session yet.
@@ -66,7 +68,7 @@ impl Client {
         let (observations_sender, observations) = mpsc::unbounded_channel();
         let (view_sender, view) = watch::channel(None);
         let (pacing_sender, pacing) = watch::channel(None);
-        let kinds = Kinds::default();
+        let watched = WatchedRun::default();
         let closed = ClosedReason::default();
         tokio::spawn(connection::run(
             self.socket,
@@ -75,7 +77,7 @@ impl Client {
                 observations: observations_sender,
                 view: view_sender,
                 pacing: pacing_sender,
-                kinds: kinds.clone(),
+                watched: watched.clone(),
                 closed: closed.clone(),
             },
         ));
@@ -114,7 +116,7 @@ impl Client {
             requests: Arc::new(requests),
             view,
             pacing,
-            kinds,
+            watched,
         };
         Ok((
             session,
@@ -147,7 +149,7 @@ pub struct Session {
     requests: Arc<Requests>,
     view: watch::Receiver<Option<View>>,
     pacing: watch::Receiver<Option<Pacing>>,
-    kinds: Kinds,
+    watched: WatchedRun,
 }
 
 impl Session {
@@ -201,14 +203,14 @@ impl Session {
     }
 
     /// Become a viewer. Returns the current view; afterwards [`Session::view`] and
-    /// [`Session::pacing`] hold the newest view and pacing state, and [`Session::kinds`] holds
-    /// the run's kinds.
+    /// [`Session::pacing`] hold the newest view and pacing state, and [`Session::kinds`] and
+    /// [`Session::terrain`] hold the run's kinds and terrain.
     pub async fn watch(&self) -> Result<View, ClientError> {
         match self
             .call(|request_id| ClientMessage::Watch { request_id })
             .await?
         {
-            ServerMessage::Watching { view, .. } => Ok(view),
+            ServerMessage::Watching(Watching { view, .. }) => Ok(view),
             other => Err(ClientError::Unexpected(Box::new(other))),
         }
     }
@@ -283,7 +285,14 @@ impl Session {
     /// The run's kinds, which views refer to. `None` until the session watches; they do not
     /// change afterwards.
     pub fn kinds(&self) -> Option<&[Kind]> {
-        self.kinds.get().map(Vec::as_slice)
+        self.watched.get().map(|run| run.kinds.as_slice())
+    }
+
+    /// Every cell's terrain as an index into [`kinds`](Self::kinds), in row-major order from the
+    /// south-west corner (`y * width + x`). `None` until the session watches. It is the terrain
+    /// when the session first watched; terrain does not change during a run yet.
+    pub fn terrain(&self) -> Option<&[u32]> {
+        self.watched.get().map(|run| run.terrain.as_slice())
     }
 
     async fn expect_ok(

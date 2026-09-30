@@ -12,7 +12,7 @@ packages: [agora-sim]
 
 This spec defines the observable behavior of the [simulation component](../cdd.md) that is currently implemented. It covers:
 
-- creating a bounded grid
+- creating a bounded grid from an environment ([SPEC-007](environment-definitions.md)), with each cell's terrain
 - spawning agents during setup
 - Start
 - action submission
@@ -21,6 +21,7 @@ This spec defines the observable behavior of the [simulation component](../cdd.m
 - viewer state
 - immediate agent removal, used for session-expiry cleanup
 - agent kinds, from the run's kind registry ([SPEC-006](kinds-and-appearance.md))
+- terrain that blocks movement
 - reflection of simulation components, for inspection
 
 It is extended feature by feature. Each change updates these requirements together with the implementation and its tests.
@@ -31,7 +32,8 @@ The CDD and [SADD](../../../architecture/sadd.md) define further behavior that i
 - batch submission
 - observation suppression and restoration
 - clearing a pending action on reconnection
-- live edits
+- live edits, including changing terrain
+- sight, which will use terrain's `blocks_sight` flag
 
 Server responsibilities are out of scope: connections, authority, pacing, deadlines, request correlation, and wire formats. Wire representations belong to shared contracts.
 
@@ -45,13 +47,13 @@ Server responsibilities are out of scope: connections, authority, pacing, deadli
 
 ### Creation and coordinates
 
-- **SPEC-001-R01:** Creating a simulation takes a grid width, a height, a run seed, a kind registry ([SPEC-006](kinds-and-appearance.md)), and the agent kind. The new simulation is in setup at state 0 with no agents. A zero width or height is rejected with a configuration error. So are dimensions whose cell count cannot be represented on the platform, an agent kind that is not in the registry, and an agent kind that is not a creature. Every spawned agent has the agent kind.
+- **SPEC-001-R01:** Creating a simulation takes an environment ([SPEC-007](environment-definitions.md)) and a run seed. It cannot fail, because an environment is already checked ([SPEC-007-R02](environment-definitions.md#layouts-and-environments)). The grid has the layout's width and height, and each cell has the layout's terrain kind. The kind registry is the environment's ([SPEC-006](kinds-and-appearance.md)), and every spawned agent has the environment's agent kind. The new simulation is in setup at state 0 with no agents.
 - **SPEC-001-R02:** Cells use unsigned `(x, y)` coordinates. `(0, 0)` is the south-west corner; `x` grows east and `y` grows north. North is `y + 1`, east is `x + 1`, south is `y − 1`, and west is `x − 1`. A cell is in bounds when `x < width` and `y < height`.
 
 ### Spawning
 
-- **SPEC-001-R03:** During setup, spawning at an explicit cell succeeds when the cell is in bounds and unoccupied, and returns the new agent's ID. A cell outside the grid returns an out-of-bounds error, and an occupied cell returns an occupied error. Neither error changes the world. Spawning does not change the state ID.
-- **SPEC-001-R04:** A random spawn chooses uniformly among all cells that are unoccupied when the spawn is applied. It draws from the run's spawn stream. If no cell is free, it returns a no-free-cell error and changes nothing.
+- **SPEC-001-R03:** During setup, spawning at an explicit cell succeeds when the cell is in bounds, its terrain does not block movement, and it is unoccupied, and returns the new agent's ID. The checks run in that order: a cell outside the grid returns an out-of-bounds error, a cell whose terrain blocks movement returns a blocked error, and an occupied cell returns an occupied error. No error changes the world. Spawning does not change the state ID.
+- **SPEC-001-R04:** A random spawn chooses uniformly among all cells whose terrain does not block movement and that are unoccupied when the spawn is applied. It draws from the run's spawn stream. If no cell is free, it returns a no-free-cell error and changes nothing.
 - **SPEC-001-R05:** Agent IDs are unsigned 64-bit integers, assigned sequentially from 1 in successful spawn order and unique within the run. Failed spawns do not consume an ID.
 - **SPEC-001-R06:** *(Interim.)* Spawning after Start returns a not-in-setup error. Post-Start admission, as described in the CDD, will replace this rule.
 
@@ -86,7 +88,7 @@ Server responsibilities are out of scope: connections, authority, pacing, deadli
 - **SPEC-001-R12:** Each step executes the accepted actions one at a time, in an order drawn from the run's shuffle stream. The shuffle is a uniform random permutation of the agents in ascending ID order. The order in which submissions arrived does not affect it.
 - **SPEC-001-R13:** Each move runs against the world as earlier moves in the same step have left it:
   - Distance 0 stays in place and ignores direction.
-  - Distance 1 moves to the adjacent cell in the given direction. It fails if that cell is out of bounds or occupied at that point in the step.
+  - Distance 1 moves to the adjacent cell in the given direction. It fails if that cell is out of bounds, has terrain that blocks movement, or is occupied at that point in the step.
   - A failed move leaves the agent in place and uses up its action.
   - An agent can enter a cell that another agent vacated earlier in the same step.
   - No per-action outcome is returned.
@@ -96,6 +98,10 @@ Server responsibilities are out of scope: connections, authority, pacing, deadli
 ### Viewer state
 
 - **SPEC-001-R16:** In any phase, the viewer state returns the current state ID, the grid dimensions, and every agent's ID, kind, and position in ascending ID order. It is separate from agent observations. The simulation also exposes its kind registry.
+
+### Terrain
+
+- **SPEC-001-R20:** The simulation exposes every cell's current terrain as an index into its kind registry, in the cell order of [SPEC-007-R01](environment-definitions.md#layouts-and-environments): row-major from the south-west corner, at `y * width + x`. Terrain comes from the environment and does not change during a run yet. Terrain whose kind blocks movement stops spawns (R03, R04) and moves (R13) as the grid's edge does. The `blocks_sight` flag has no effect yet.
 
 ### Removal
 
@@ -111,7 +117,7 @@ Server responsibilities are out of scope: connections, authority, pacing, deadli
 
 ## Interfaces and data
 
-The Rust API is `agora_sim::Simulation`. Operation names map to `new`, `spawn`, `start`, `submit`, `readiness`, `advance`, `view`, `remove`, `kinds`, and `agent_count`. Error variants correspond to the error names above. These are internal package interfaces, not wire contracts.
+The Rust API is `agora_sim::Simulation`, created from a `SimConfig` holding an `agora_env::Environment` and a seed. Operation names map to `new`, `spawn`, `start`, `submit`, `readiness`, `advance`, `view`, `remove`, `kinds`, `terrain`, and `agent_count`. Error variants correspond to the error names above. These are internal package interfaces, not wire contracts.
 
 ## Acceptance criteria and verification
 
@@ -119,10 +125,10 @@ Tests are in `rust/agora-sim/tests/lifecycle_and_movement.rs`, except R19's, whi
 
 | Requirement | Check and expected outcome | Test |
 | --- | --- | --- |
-| R01 | New simulation is in setup at state 0 with no agents; zero dimensions, an unknown agent kind, and an agent kind that is not a creature are rejected. | `r01_*` |
+| R01, R20 | New simulation is in setup at state 0 with no agents; the grid's size and terrain come from the layout, in the documented order; agents get the environment's agent kind. | `r01_*` |
 | R02 | Each direction moves along the documented axis. | `r02_*` |
-| R03 | Explicit spawn succeeds; out-of-bounds and occupied cells fail without changes. | `r03_*` |
-| R04 | Random spawns fill every free cell and then report no free cell; picks cover the free cells. | `r04_*` |
+| R03 | Explicit spawn succeeds; out-of-bounds, blocked, and occupied cells fail without changes. | `r03_*` |
+| R04 | Random spawns fill every free cell and then report no free cell; picks cover the free cells; cells with blocking terrain are never picked. | `r04_*` |
 | R05 | IDs are 1, 2, … and failed spawns don't consume an ID. | `r05_*` |
 | R06 | Spawning after Start fails. | `r06_*` |
 | R07 | Start returns state-0 observations for all agents, works with zero agents, and can't be repeated. | `r07_*` |
@@ -130,7 +136,7 @@ Tests are in `rust/agora-sim/tests/lifecycle_and_movement.rs`, except R19's, whi
 | R09 | A second submission for the same agent and state is rejected; the first action executes. | `r09_*` |
 | R10 | Each status is reported, and missing agents shrink as actions are accepted. | `r10_*` |
 | R11 | Advancing before the run is ready fails without changes. | `r11_*` |
-| R12, R13, R14 | Blocked moves and edges fail. Contested cells and follow-the-leader moves produce both possible outcomes depending on shuffle order, and cells are never shared. | `r12_*`, `r13_*`, `r14_*` |
+| R12, R13, R14 | Blocked moves, edges, and blocking terrain fail. Contested cells and follow-the-leader moves produce both possible outcomes depending on shuffle order, and cells are never shared. | `r12_*`, `r13_*`, `r14_*` |
 | R15 | The state ID increments, observations carry N+1, and actions clear. | `r15_*` |
 | R16 | View contents, including each agent's kind, in setup and after steps. | `r16_*` |
 | R17 | Identical seeds and inputs give identical histories; different seeds can differ. | `r17_*` |

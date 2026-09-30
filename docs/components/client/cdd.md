@@ -51,7 +51,7 @@ Failures are `ClientError` values: a transport failure, a server rejection carry
 
 ## The demo client
 
-`agora-demo` moves every agent it owns one random cardinal step each state. `create` creates a run on the bundled catalog entry, prints the run ID on standard output, watches the run, and starts it once the view shows enough agents. `join` joins a run by ID. Both stop after a set number of steps or when interrupted. Watching makes the creating demo a viewer, so its run is paced at the server's default interval unless `--unlimited` claims pacing control and removes it.
+`agora-demo` moves every agent it owns one random cardinal step each state. `create` creates a run on the `empty-grid-10x10` catalog entry, prints the run ID on standard output, watches the run, and starts it once the view shows enough agents. `join` joins a run by ID. Both stop after a set number of steps or when interrupted. Watching makes the creating demo a viewer, so its run is paced at the server's default interval unless `--unlimited` claims pacing control and removes it.
 
 ## Design constraints and rationale
 

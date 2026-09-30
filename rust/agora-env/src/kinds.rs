@@ -134,6 +134,11 @@ impl KindRegistry {
         self.index.get(id).map(|&i| &self.kinds[i])
     }
 
+    /// A kind's position in declaration order.
+    pub fn index_of(&self, id: &KindId) -> Option<usize> {
+        self.index.get(id).copied()
+    }
+
     /// The kinds in declaration order.
     pub fn iter(&self) -> impl ExactSizeIterator<Item = &Kind> {
         self.kinds.iter()

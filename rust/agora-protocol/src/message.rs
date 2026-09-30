@@ -2,6 +2,7 @@
 //! `type` field selects the variant.
 
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 use crate::error::{ErrorCode, ErrorResponse};
 use crate::ids::{AgentId, CatalogEntryId, KindId, RequestId, RunId, SessionId, StateId};
@@ -136,14 +137,8 @@ pub enum ServerMessage {
         state_id: StateId,
         observations: Vec<AgentObservation>,
     },
-    /// Successful `watch`: the session is a viewer. `view` and `pacing` are the run's current
-    /// state, and `kinds` is the run's kind registry, which views refer to.
-    Watching {
-        request_id: RequestId,
-        view: View,
-        pacing: Pacing,
-        kinds: Vec<Kind>,
-    },
+    /// Successful `watch`: the session is a viewer.
+    Watching(Watching),
     /// Pushed by the server, not a response: the run's newest state, for viewers.
     ViewUpdate { view: View },
     /// Successful `claim_pacing`: this session holds pacing control.
@@ -175,7 +170,7 @@ impl ServerMessage {
             | Self::Spawned { request_id, .. }
             | Self::Started { request_id }
             | Self::Submitted { request_id, .. }
-            | Self::Watching { request_id, .. }
+            | Self::Watching(Watching { request_id, .. })
             | Self::PacingClaimed { request_id }
             | Self::PacingSet { request_id }
             | Self::StepGranted { request_id }
@@ -191,13 +186,89 @@ impl ServerMessage {
     }
 }
 
+/// The response to `watch`. `view` and `pacing` are the run's current state, `kinds` is the
+/// run's kind registry, which views refer to, and `terrain` is every cell's terrain when the
+/// response was sent. Parsing checks that `terrain` fits the view and names terrain kinds.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "WatchingFields")]
+pub struct Watching {
+    pub request_id: RequestId,
+    pub view: View,
+    pub pacing: Pacing,
+    pub kinds: Vec<Kind>,
+    /// Each cell's terrain as an index into `kinds`, in row-major order from the south-west
+    /// corner: the cell at `(x, y)` is at `y * width + x`.
+    pub terrain: Vec<u32>,
+}
+
+#[derive(Deserialize)]
+struct WatchingFields {
+    request_id: RequestId,
+    view: View,
+    pacing: Pacing,
+    kinds: Vec<Kind>,
+    terrain: Vec<u32>,
+}
+
+/// `terrain` in `watching` does not fit its view or kinds.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum InvalidTerrain {
+    #[error("terrain has {actual} cells, but the view is {width} x {height}")]
+    WrongCellCount {
+        width: u32,
+        height: u32,
+        actual: usize,
+    },
+    #[error("terrain index {0} is not a terrain kind in kinds")]
+    NotTerrain(u32),
+}
+
+impl TryFrom<WatchingFields> for Watching {
+    type Error = InvalidTerrain;
+
+    fn try_from(fields: WatchingFields) -> Result<Self, Self::Error> {
+        let WatchingFields {
+            request_id,
+            view,
+            pacing,
+            kinds,
+            terrain,
+        } = fields;
+        let cells = u64::from(view.width) * u64::from(view.height);
+        if terrain.len() as u64 != cells {
+            return Err(InvalidTerrain::WrongCellCount {
+                width: view.width,
+                height: view.height,
+                actual: terrain.len(),
+            });
+        }
+        let mut checked = Vec::new();
+        for &index in &terrain {
+            if checked.contains(&index) {
+                continue;
+            }
+            match kinds.get(index as usize) {
+                Some(Kind::Terrain { .. }) => checked.push(index),
+                _ => return Err(InvalidTerrain::NotTerrain(index)),
+            }
+        }
+        Ok(Self {
+            request_id,
+            view,
+            pacing,
+            kinds,
+            terrain,
+        })
+    }
+}
+
 /// Spawn placement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Placement {
     /// A specific cell. `(0, 0)` is the south-west corner; `x` grows east and `y` grows north.
     Cell { x: u32, y: u32 },
-    /// A cell chosen uniformly among unoccupied cells.
+    /// A cell chosen uniformly among unoccupied cells whose terrain does not block movement.
     Random,
 }
 

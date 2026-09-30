@@ -12,7 +12,7 @@ packages: [agora-protocol, agora-server, agora-client, agora-viewer]
 
 This contract is the canonical definition of the messages exchanged between the Agora server and its clients: the Rust client, the viewer, and later the Python client. It implements the SADD's [communication](../architecture/sadd.md#simulation-step-coordination), [error-response](../architecture/sadd.md#error-responses), and [run lifecycle](../architecture/sadd.md#run-lifecycle) rules.
 
-The contract grows feature by feature. Protocol version 0.6.0 currently covers:
+The contract grows feature by feature. Protocol version 0.7.0 currently covers:
 
 - message framing
 - the version handshake
@@ -20,11 +20,11 @@ The contract grows feature by feature. Protocol version 0.6.0 currently covers:
 - errors
 - run setup: create, join, spawn, and Start
 - action submission and agent observations
-- watching a run's view, with the run's kinds
+- watching a run's view, with the run's kinds and terrain
 - pacing controls
 - leaving and closing runs
 
-Session recovery and credentials are not yet defined. They are added as the features that use them are built. Version 0.2.0 added submission and observations, 0.3.0 added watching, 0.4.0 added pacing, 0.5.0 added leaving and closing runs, and 0.6.0 added kinds to `watching` and to agents in views.
+Session recovery and credentials are not yet defined. They are added as the features that use them are built. Version 0.2.0 added submission and observations, 0.3.0 added watching, 0.4.0 added pacing, 0.5.0 added leaving and closing runs, 0.6.0 added kinds to `watching` and to agents in views, and 0.7.0 added terrain to `watching` and the `cell_blocked` error.
 
 ## Terminology and preconditions
 
@@ -63,7 +63,7 @@ Session recovery and credentials are not yet defined. They are added as the feat
   - Backward-compatible additions increase the minor version.
   - Clarifications and fixes that don't change messages increase the patch version.
 
-  The current version is **0.6.0**. Protocol versions are independent of capability versions.
+  The current version is **0.7.0**. Protocol versions are independent of capability versions.
 - **SPEC-002-R06:** *(MVP.)* The server accepts only a client version exactly equal to its own. Semver-based backward compatibility is intended from 1.0.0 onward: the same major version, with the server's minor version at least the client's. Defining that rule will require a change to this spec.
 
 ### Requests and sessions
@@ -90,7 +90,7 @@ Session recovery and credentials are not yet defined. They are added as the feat
   | `spawn {request_id, placement}` | `spawned {request_id, agent_id}` | Sent once the agent has been placed. The session owns the agent. Coordinates are not returned. |
   | `start {request_id}` | `started {request_id}` | Confirms that the run has started. Initial observations for state 0 follow as a push ([R11](#steps-and-observations)). |
 
-  - `placement` is either `{"kind": "random"}`, meaning uniformly among unoccupied cells, or `{"kind": "cell", "x", "y"}`. On the wire, `(0, 0)` is the grid's south-west corner, `x` grows east, and `y` grows north.
+  - `placement` is either `{"kind": "random"}`, meaning uniformly among unoccupied cells whose terrain does not block movement, or `{"kind": "cell", "x", "y"}`. On the wire, `(0, 0)` is the grid's south-west corner, `x` grows east, and `y` grows north.
   - A `create_run` or `join_run` on a connection that already has a session returns `session_already_established`.
   - A run-scoped request before a session exists, or after it has ended, returns `no_session`.
 
@@ -107,7 +107,7 @@ Session recovery and credentials are not yet defined. They are added as the feat
 
 ### Viewing
 
-- **SPEC-002-R12:** `watch {request_id}` makes the session a viewer until its connection closes. There is no request to stop watching. The response is `watching {request_id, view, pacing, kinds}`, where `view` and `pacing` ([R13](#pacing)) are the run's current state and `kinds` is the run's kind registry. Watching again returns the current state and changes nothing else. Afterwards the server pushes `view_update {view}` when the view changes, after the response to any request that caused the change. A viewer may skip intermediate views, so each view is complete.
+- **SPEC-002-R12:** `watch {request_id}` makes the session a viewer until its connection closes. There is no request to stop watching. The response is `watching {request_id, view, pacing, kinds, terrain}`, where `view` and `pacing` ([R13](#pacing)) are the run's current state, `kinds` is the run's kind registry, and `terrain` is the run's terrain when the response is sent. Watching again returns the current state and changes nothing else. Afterwards the server pushes `view_update {view}` when the view changes, after the response to any request that caused the change. A viewer may skip intermediate views, so each view is complete.
 
   A view is `{state_id, phase, width, height, agents}`:
   - `phase` is `setup` or `started`, and `width` and `height` are the grid size in cells.
@@ -115,11 +115,13 @@ Session recovery and credentials are not yet defined. They are added as the feat
 
   Views are separate from agent observations and are not limited to the session's own agents.
 
-  `kinds` lists every kind in the run once, in the registry's order ([SPEC-006](../components/simulation/specs/kinds-and-appearance.md)), and does not change during a run, so views refer to kinds by ID. `category` selects the form of each entry:
+  `kinds` lists every kind in the run once, in the registry's order ([SPEC-006](../components/simulation/specs/kinds-and-appearance.md)), and does not change during a run, so views refer to kinds by ID and `terrain` by index. `category` selects the form of each entry:
   - `{"category": "terrain", kind, class, blocks_movement, blocks_sight}`, where `class` is `floor` or `wall` and the flags are booleans;
   - `{"category": "item", kind, appearance}` and `{"category": "creature", kind, appearance}`, where `appearance` is `{hue, size, shape}`: `hue` and `size` are numbers from 0 to 1 inclusive, and `shape` is `agent` or `round`.
 
   Other categories, classes, and shapes, and numbers outside 0 to 1, are malformed. Kind IDs are for viewers only; agents will perceive appearance, not kind IDs.
+
+  `terrain` is an array of integers with one entry per cell, `width × height` in all, in row-major order from the south-west corner: the cell at `(x, y)` is entry `y * width + x`. Each entry is an index into `kinds`, counted from 0, that names a terrain kind. A `terrain` of the wrong length, or with an entry that is negative, out of range, or not a terrain kind, is malformed. Terrain does not change during a run yet. It is a snapshot, so that later changes can be sent as a push of changed cells without changing this response. Like kind IDs, it is for viewers only; agents will perceive terrain through sight.
 
 ### Pacing
 
@@ -167,8 +169,9 @@ Session recovery and credentials are not yet defined. They are added as the feat
   | `run_already_started` | Operation only available during setup | — |
   | `start_not_eligible` | Start with no agents and no connected viewers | — |
   | `cell_out_of_bounds` | Spawn cell outside the grid | `x`, `y` |
+  | `cell_blocked` | Spawn cell's terrain blocks movement | `x`, `y` |
   | `cell_occupied` | Spawn cell occupied | `x`, `y` |
-  | `no_free_cell` | Random placement found no unoccupied cell | — |
+  | `no_free_cell` | Random placement found no unoccupied cell that terrain does not block | — |
   | `run_not_started` | Operation only available after Start | — |
   | `wrong_state` | Submission for a state other than the current one | `expected`, `supplied` |
   | `agent_not_owned` | *(Entry.)* The session does not own the agent | — |
@@ -206,7 +209,7 @@ Rust tests are named by requirement ID. Message types are tested in `rust/agora-
 | R07 | Only `hello` lacks a request ID | `r07_*` |
 | R09 | Known codes map to their wire names, including the `agent_limit.` prefix, and unknown codes are preserved | `r09_*` |
 | R10 | An accepted entry has no `error` field | `r10_*` |
-| R12 | View and kind fixtures round-trip; negative coordinates, a missing phase, a missing or empty agent kind, `watching` without kinds, and invalid kinds (unknown category, class, or shape, hue or size outside 0 to 1, a missing flag or appearance, an empty ID) are rejected; hue and size accept 0 and 1 | `valid/`, `invalid/server/view_*`, `invalid/server/kind_*`, `invalid/server/watching_missing_kinds.json`, `r12_*` |
+| R12 | View, kind, and terrain fixtures round-trip; negative coordinates, a missing phase, a missing or empty agent kind, `watching` without kinds or terrain, invalid kinds (unknown category, class, or shape, hue or size outside 0 to 1, a missing flag or appearance, an empty ID), and invalid terrain (wrong length, a negative or out-of-range index, an index that is not terrain) are rejected; the terrain fixtures fail the terrain check; hue and size accept 0 and 1 | `valid/`, `invalid/server/view_*`, `invalid/server/kind_*`, `invalid/server/watching_*`, `r12_*` |
 | R14, R15 | Leave and close fixtures round-trip; `run_closed` without a reason is rejected; an unknown reason is read as a generic closure | `valid/`, `invalid/server/run_closed_missing_reason.json`, `r15_*` |
 | R13 | Pacing fixtures round-trip; intervals of 0 and over an hour, unknown modes, and `watching` without pacing are rejected | `valid/`, `invalid/client/set_pacing_*`, `invalid/server/watching_missing_pacing.json` |
 | R01 (server) | Unknown types report their type; invalid JSON, non-objects, missing fields, and binary frames are malformed, echoing any readable request ID | server `r01_*` |
@@ -214,10 +217,10 @@ Rust tests are named by requirement ID. Message types are tested in `rust/agora-
 | R04, R06 (server) | `hello` gets `welcome`; an unsupported version is rejected and the connection closed; requests before `hello` and a second `hello` are rejected | server `r04_*` |
 | R07 (server) | Retries replay results, including errors, without re-executing; conflicts, skipped IDs, and IDs older than the retained results are rejected; sessions number requests independently | server `r07_*` |
 | R08 (server) | Create, join, spawn, and Start succeed with the documented fields; a second session and requests without a session are rejected | server `r08_*` |
-| R09 (server) | Catalog, run, and spawn failures return their codes and details | server `r09_*` |
+| R09 (server) | Catalog, run, and spawn failures, including a spawn on a wall, return their codes and details | server `r09_*` |
 | R10 (server) | Entry results are in order with their codes and details; submitting before Start or for another state is rejected, and a rejected submission leaves the slot open | server `r10_*` |
 | R11 (server) | `started` precedes the state-0 observations; the step-completing `submitted` precedes the state-1 observations | server `r11_*` |
-| R12 (server) | `watching` carries the current view and the built-in kinds; a viewer receives a view after a spawn, Start, and a step, with the moved position and the agent's kind | server `r12_*` |
+| R12 (server) | `watching` carries the current view, the built-in kinds, and each catalog entry's terrain; a viewer receives a view after a spawn, Start, and a step, with the moved position and the agent's kind | server `r12_*` |
 | R13 (server) | `watching` carries the default pacing state; each pacing request gets its response and the changes are pushed; each error code is returned | server `r13_*` |
 | R14 (server) | `left` ends the session, later requests and a retried leave return `no_session`, and the connection can join again; a non-creator's close returns `not_creator`, and the creator's returns `closed` and ends its session | server `r14_*` |
 | R15 (server) | Other sessions receive `run_closed` with the reason, lose their session, and can create a new run | server `r15_*` |

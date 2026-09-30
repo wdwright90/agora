@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use agora_env::{KindId, KindRegistry, Look};
+use agora_env::{Environment, KindId, KindRegistry, Look};
 use bevy_ecs::prelude::*;
 use bevy_ecs::reflect::{AppTypeRegistry, ReflectComponent};
 use bevy_reflect::Reflect;
@@ -11,7 +11,7 @@ use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
 use crate::error::{
-    AdvanceError, AgentLimitError, ConfigError, RemoveError, SpawnError, StartError, SubmitError,
+    AdvanceError, AgentLimitError, RemoveError, SpawnError, StartError, SubmitError,
 };
 use crate::types::{
     AgentId, AgentView, GridPos, MOVEMENT_BUDGET, Move, Observation, Observations, Placement,
@@ -27,16 +27,10 @@ const SHUFFLE_STREAM: u64 = 2;
 /// Configuration for creating a simulation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SimConfig {
-    /// Grid width in cells.
-    pub width: u32,
-    /// Grid height in cells.
-    pub height: u32,
+    /// The run's kinds, terrain layout, and agent kind (SPEC-007).
+    pub environment: Environment,
     /// Run seed from which all of the run's random streams are derived.
     pub seed: u64,
-    /// Every kind in the run (SPEC-006).
-    pub kinds: Arc<KindRegistry>,
-    /// The kind given to every spawned agent. It must be a creature in `kinds`.
-    pub agent_kind: KindId,
 }
 
 // Every component derives `Reflect` and is registered in `Simulation::new`, so inspection can
@@ -63,11 +57,17 @@ struct Kinds {
     agent: KindId,
 }
 
-/// Bounded grid dimensions plus a cell-to-agent index.
+/// Bounded grid dimensions, each cell's terrain, and a cell-to-agent index.
 #[derive(Resource)]
 struct Grid {
     width: u32,
     height: u32,
+    /// Each cell's terrain kind, as an index into the kind registry, in row-major order
+    /// (`y * width + x`). Only `Simulation::new` sets it; a future terrain change must update
+    /// `blocked` with it.
+    terrain: Vec<usize>,
+    /// Whether each cell's terrain blocks movement, derived from `terrain`.
+    blocked: Vec<bool>,
     /// Which agent, if any, occupies each cell, in row-major order (`y * width + x`).
     /// Answers "is this cell free?" in constant time during spawns and moves, and lists
     /// free cells in a fixed order for random spawning. It mirrors the agents' `Position`
@@ -79,6 +79,11 @@ impl Grid {
     fn index(&self, pos: GridPos) -> Option<usize> {
         (pos.x < self.width && pos.y < self.height)
             .then(|| pos.y as usize * self.width as usize + pos.x as usize)
+    }
+
+    /// Whether a cell can be entered: its terrain does not block movement and no agent is in it.
+    fn is_free(&self, index: usize) -> bool {
+        !self.blocked[index] && self.occupancy[index].is_none()
     }
 
     fn position(&self, index: usize) -> GridPos {
@@ -130,25 +135,22 @@ pub struct Simulation {
 
 impl Simulation {
     /// Create a simulation in setup at state 0.
-    pub fn new(config: SimConfig) -> Result<Self, ConfigError> {
-        let SimConfig {
-            width,
-            height,
-            seed,
-            kinds,
-            agent_kind,
-        } = config;
-        if width == 0 || height == 0 {
-            return Err(ConfigError::EmptyGrid { width, height });
-        }
-        let cells = (width as usize)
-            .checked_mul(height as usize)
-            .ok_or(ConfigError::GridTooLarge { width, height })?;
-        match kinds.get(&agent_kind).map(|kind| kind.look) {
-            None => return Err(ConfigError::UnknownAgentKind(agent_kind)),
-            Some(Look::Creature(_)) => {}
-            Some(_) => return Err(ConfigError::AgentKindNotCreature(agent_kind)),
-        }
+    pub fn new(config: SimConfig) -> Self {
+        let SimConfig { environment, seed } = config;
+        let kinds = environment.kinds();
+        let layout = environment.layout();
+        // `Environment` guarantees every layout kind is registered terrain.
+        let terrain: Vec<usize> = layout
+            .cells()
+            .iter()
+            .map(|kind| kinds.index_of(kind).expect("layout kinds are registered"))
+            .collect();
+        let kinds_block: Vec<bool> = kinds
+            .iter()
+            .map(|kind| matches!(kind.look, Look::Terrain(t) if t.blocks_movement))
+            .collect();
+        let blocked = terrain.iter().map(|&index| kinds_block[index]).collect();
+        let cells = terrain.len();
 
         let mut world = World::new();
         let types = AppTypeRegistry::default();
@@ -159,14 +161,16 @@ impl Simulation {
             types.register::<Kind>();
         }
         world.insert_resource(types);
-        world.insert_resource(Kinds {
-            registry: kinds,
-            agent: agent_kind,
-        });
         world.insert_resource(Grid {
-            width,
-            height,
+            width: layout.width(),
+            height: layout.height(),
+            terrain,
+            blocked,
             occupancy: vec![None; cells],
+        });
+        world.insert_resource(Kinds {
+            registry: Arc::clone(kinds),
+            agent: environment.agent_kind().clone(),
         });
         world.insert_resource(Lifecycle {
             phase: Phase::Setup,
@@ -179,7 +183,7 @@ impl Simulation {
             spawn: stream(seed, SPAWN_STREAM),
             shuffle: stream(seed, SHUFFLE_STREAM),
         });
-        Ok(Self { world })
+        Self { world }
     }
 
     /// Spawn an agent during setup and return its assigned ID.
@@ -193,6 +197,9 @@ impl Simulation {
             match placement {
                 Placement::Cell(pos) => {
                     let index = grid.index(pos).ok_or(SpawnError::OutOfBounds(pos))?;
+                    if grid.blocked[index] {
+                        return Err(SpawnError::Blocked(pos));
+                    }
                     if grid.occupancy[index].is_some() {
                         return Err(SpawnError::Occupied(pos));
                     }
@@ -200,7 +207,7 @@ impl Simulation {
                 }
                 Placement::Random => {
                     let free: Vec<usize> = (0..grid.occupancy.len())
-                        .filter(|&i| grid.occupancy[i].is_none())
+                        .filter(|&i| grid.is_free(i))
                         .collect();
                     if free.is_empty() {
                         return Err(SpawnError::NoFreeCell);
@@ -387,6 +394,12 @@ impl Simulation {
         &self.world.resource::<Kinds>().registry
     }
 
+    /// Every cell's current terrain, as indices into [`kinds`](Self::kinds), in row-major order
+    /// from the south-west corner (`y * width + x`).
+    pub fn terrain(&self) -> &[usize] {
+        &self.world.resource::<Grid>().terrain
+    }
+
     /// Number of agents currently in the world.
     pub fn agent_count(&self) -> usize {
         self.world.resource::<Agents>().0.len()
@@ -406,7 +419,7 @@ impl Simulation {
         let Some(to_index) = grid.index(to) else {
             return;
         };
-        if grid.occupancy[to_index].is_some() {
+        if !grid.is_free(to_index) {
             return;
         }
         let from_index = grid.index(from).expect("agent position is in bounds");
@@ -461,14 +474,17 @@ mod tests {
     /// SPEC-001-R19: every component on an agent entity is registered for reflection.
     #[test]
     fn r19_agent_components_are_reflectable() {
-        let mut sim = Simulation::new(SimConfig {
-            width: 3,
-            height: 3,
-            seed: 0,
-            kinds: Arc::new(agora_env::builtin::registry()),
-            agent_kind: agora_env::builtin::agent_kind(),
-        })
+        let environment = agora_env::Environment::new(
+            Arc::new(agora_env::builtin::registry()),
+            agora_env::Layout::filled(3, 3, KindId::new(agora_env::builtin::FLOOR).unwrap())
+                .unwrap(),
+            agora_env::builtin::agent_kind(),
+        )
         .unwrap();
+        let mut sim = Simulation::new(SimConfig {
+            environment,
+            seed: 0,
+        });
         let agent = sim.spawn(Placement::Random).unwrap();
         let entity = sim.world.resource::<Agents>().0[&agent];
 

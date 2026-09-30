@@ -3,7 +3,7 @@
 
 use agora_protocol::{
     Action, AgentId, ClientMessage, Direction, EntryError, EntryResult, ErrorCode, ErrorResponse,
-    PROTOCOL_VERSION, ProtocolVersion, RequestId, RunId, ServerMessage, SessionId,
+    PROTOCOL_VERSION, ProtocolVersion, RequestId, RunId, ServerMessage, SessionId, Watching,
 };
 use agora_sim::{AgentLimitError, GridPos, SpawnError, SubmitError};
 use futures_util::{SinkExt, StreamExt};
@@ -370,11 +370,14 @@ impl SessionLink {
                 .run
                 .watch(self.id.clone(), self.connection, self.view_slot.clone())
                 .await
-                .map(|watched| ServerMessage::Watching {
-                    request_id: id,
-                    view: watched.view,
-                    pacing: watched.pacing,
-                    kinds: watched.kinds,
+                .map(|watched| {
+                    ServerMessage::Watching(Watching {
+                        request_id: id,
+                        view: watched.view,
+                        pacing: watched.pacing,
+                        kinds: watched.kinds,
+                        terrain: watched.terrain,
+                    })
                 }),
             ClientMessage::ClaimPacing { .. } => {
                 self.run.claim_pacing(self.id.clone()).await.map(|result| {
@@ -539,6 +542,10 @@ fn spawn_error(id: RequestId, error: SpawnError) -> ErrorResponse {
         SpawnError::NotInSetup => wire::error(Some(id), ErrorCode::RunAlreadyStarted, message),
         SpawnError::OutOfBounds(cell) => wire::with_details(
             wire::error(Some(id), ErrorCode::CellOutOfBounds, message),
+            json!({ "x": cell.x, "y": cell.y }),
+        ),
+        SpawnError::Blocked(cell) => wire::with_details(
+            wire::error(Some(id), ErrorCode::CellBlocked, message),
             json!({ "x": cell.x, "y": cell.y }),
         ),
         SpawnError::Occupied(cell) => wire::with_details(

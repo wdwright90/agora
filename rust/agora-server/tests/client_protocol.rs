@@ -495,6 +495,11 @@ async fn r09_spawn_failures_map_to_their_codes() {
     let details = serde_json::Value::Object(error.details.unwrap());
     assert_eq!(details, json!({ "x": 2, "y": 2 }));
 
+    let (mut divided, _) = Client::with_new_run_from(address, common::divided()).await;
+    let error = expect_code(divided.spawn(cell(5, 0)).await, ErrorCode::CellBlocked);
+    let details = serde_json::Value::Object(error.details.unwrap());
+    assert_eq!(details, json!({ "x": 5, "y": 0 }));
+
     for _ in 1..100 {
         let reply = client.spawn(Placement::Random).await;
         assert!(matches!(reply, ServerMessage::Spawned { .. }), "{reply:?}");
@@ -652,7 +657,7 @@ async fn r12_watching_carries_the_run_kinds() {
     let address = start_default_server().await;
     let (mut client, _) = Client::with_new_run(address).await;
 
-    let (_, _, kinds) = client.watch_with_kinds().await;
+    let kinds = client.watching().await.kinds;
 
     assert_eq!(
         serde_json::to_value(kinds).unwrap(),
@@ -667,6 +672,25 @@ async fn r12_watching_carries_the_run_kinds() {
               "appearance": { "hue": 0.6, "size": 0.5, "shape": "agent" } },
         ])
     );
+}
+
+#[tokio::test]
+async fn r12_watching_carries_the_terrain_as_kind_indices() {
+    let address = start_default_server().await;
+    let (mut client, _) = Client::with_new_run_from(address, common::divided()).await;
+
+    let watching = client.watching().await;
+
+    // Built-in kinds: floor is index 0 and wall is index 1. Cells are row-major from the
+    // south-west corner.
+    let expected: Vec<u32> = (0..10)
+        .flat_map(|y| (0..10).map(move |x| u32::from(x == 5 && !(4..=5).contains(&y))))
+        .collect();
+    assert_eq!(watching.terrain, expected);
+    assert_eq!(watching.kinds[1].id().as_str(), "wall");
+
+    let (mut open, _) = Client::with_new_run(address).await;
+    assert_eq!(open.watching().await.terrain, vec![0; 100]);
 }
 
 #[tokio::test]

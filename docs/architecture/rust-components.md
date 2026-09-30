@@ -13,7 +13,7 @@ flowchart BT
     server["<b>agora-server</b><br/>host application<br/>tokio + WebSocket"]
     client["<b>agora-client</b><br/>client library<br/>+ agora-demo"]
     viewer["<b>agora-viewer</b><br/>Bevy + egui viewer"]
-    env["<b>agora-env</b><br/>kind registry, later<br/>environment definitions<br/>no Bevy runtime types"]
+    env["<b>agora-env</b><br/>kind registry and<br/>environment definitions<br/>no Bevy runtime types"]
     recording["agora-recording<br/>(planned)"]
 
     server --> sim
@@ -33,7 +33,7 @@ flowchart BT
 Points worth noticing:
 
 - **`agora-sim` does not depend on `agora-protocol`.** The simulation keeps its own types and the server maps them to protocol messages, so wire concerns stay out of simulation code ([package mapping](sadd.md#rust-package-mapping)).
-- **`agora-env` is data only.** It declares every kind and how it looks, with no Bevy runtime types, so tools can use it without the simulation. The server sends the registry to viewers in wire form rather than the viewer depending on it.
+- **`agora-env` is data only.** It declares every kind and how it looks, and loads environment definitions, with no Bevy runtime types, so tools can use it without the simulation. The server builds its catalog from the bundled definitions and sends the registry and terrain to viewers in wire form rather than the viewer depending on it.
 - **The viewer does not depend on `agora-sim`.** It draws from the view data the server sends, not from simulation types ([ADR-002](../decisions/0002-inspection-and-debug-visualization.md)). It reaches the server through the same client library any Rust client uses, and gets `agora-protocol` through it.
 - **The server and client share only `agora-protocol`.** Any client in any language that follows the [client protocol](../contracts/client-protocol.md) can take part; the planned Python trainer is one.
 - `agora-client` and `agora-viewer` use `agora-server` only as a dev-dependency, to run tests against a real server.
