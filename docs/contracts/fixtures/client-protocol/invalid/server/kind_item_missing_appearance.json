@@ -1,0 +1,1 @@
+{ "type": "watching", "request_id": 2, "view": { "state_id": 0, "phase": "setup", "width": 10, "height": 10, "agents": [] }, "pacing": { "mode": { "kind": "interval", "ms": 500 }, "you_control": false }, "kinds": [{ "category": "item", "kind": "berry" }] }

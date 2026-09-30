@@ -2,20 +2,27 @@
 //! Test names start with the requirement ID they verify.
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
+use agora_env::{KindId, builtin};
 use agora_sim::{
     AdvanceError, AgentId, AgentLimitError, ConfigError, Direction, GridPos, Move, Placement,
     RemoveError, SimConfig, Simulation, SpawnError, StartError, StateId, Status, Submission,
     SubmitError, ViewState,
 };
 
-fn sim(width: u32, height: u32, seed: u64) -> Simulation {
-    Simulation::new(SimConfig {
+fn config(width: u32, height: u32, seed: u64) -> SimConfig {
+    SimConfig {
         width,
         height,
         seed,
-    })
-    .expect("valid config")
+        kinds: Arc::new(builtin::registry()),
+        agent_kind: builtin::agent_kind(),
+    }
+}
+
+fn sim(width: u32, height: u32, seed: u64) -> Simulation {
+    Simulation::new(config(width, height, seed)).expect("valid config")
 }
 
 fn spawn_at(sim: &mut Simulation, x: u32, y: u32) -> AgentId {
@@ -62,12 +69,29 @@ fn r01_new_simulation_is_in_setup_at_state_zero() {
 #[test]
 fn r01_zero_dimensions_are_rejected() {
     for (width, height) in [(0, 10), (10, 0), (0, 0)] {
-        let result = Simulation::new(SimConfig {
-            width,
-            height,
-            seed: 0,
-        });
+        let result = Simulation::new(config(width, height, 0));
         assert!(matches!(result, Err(ConfigError::EmptyGrid { .. })));
+    }
+}
+
+#[test]
+fn r01_agent_kind_must_be_a_registered_creature() {
+    let kind = |id: &str| KindId::new(id).unwrap();
+    let with_kind = |agent_kind| {
+        Simulation::new(SimConfig {
+            agent_kind,
+            ..config(10, 10, 0)
+        })
+    };
+    assert_eq!(
+        with_kind(kind("dragon")).err(),
+        Some(ConfigError::UnknownAgentKind(kind("dragon")))
+    );
+    for not_creature in [builtin::FLOOR, builtin::BERRY] {
+        assert_eq!(
+            with_kind(kind(not_creature)).err(),
+            Some(ConfigError::AgentKindNotCreature(kind(not_creature)))
+        );
     }
 }
 
@@ -530,9 +554,12 @@ fn r16_view_reports_state_dimensions_and_agents_in_id_order() {
     assert_eq!(
         view.agents
             .iter()
-            .map(|agent| (agent.id, agent.position))
+            .map(|agent| (agent.id, agent.kind.as_str(), agent.position))
             .collect::<Vec<_>>(),
-        [(a, GridPos::new(4, 4)), (b, GridPos::new(1, 7))]
+        [
+            (a, builtin::AGENT, GridPos::new(4, 4)),
+            (b, builtin::AGENT, GridPos::new(1, 7))
+        ]
     );
 
     sim.start().unwrap();

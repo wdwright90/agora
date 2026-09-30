@@ -48,7 +48,7 @@ pub fn controls(creator: bool, view: Option<&View>, pacing: Option<&Pacing>) -> 
 
 #[cfg(test)]
 mod tests {
-    use agora_client::protocol::{AgentId, AgentView, IntervalMs, StateId};
+    use agora_client::protocol::{AgentId, AgentView, IntervalMs, KindId, StateId};
 
     use super::*;
 
@@ -61,6 +61,7 @@ mod tests {
             agents: (1..=agents)
                 .map(|n| AgentView {
                     agent_id: AgentId::new(n).unwrap(),
+                    kind: KindId::new("agent").unwrap(),
                     x: 0,
                     y: n as u32,
                 })

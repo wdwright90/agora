@@ -4,7 +4,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::{ErrorCode, ErrorResponse};
-use crate::ids::{AgentId, CatalogEntryId, RequestId, RunId, SessionId, StateId};
+use crate::ids::{AgentId, CatalogEntryId, KindId, RequestId, RunId, SessionId, StateId};
+use crate::kinds::Kind;
 use crate::pacing::{Pacing, PacingMode};
 use crate::version::ProtocolVersion;
 
@@ -136,11 +137,12 @@ pub enum ServerMessage {
         observations: Vec<AgentObservation>,
     },
     /// Successful `watch`: the session is a viewer. `view` and `pacing` are the run's current
-    /// state.
+    /// state, and `kinds` is the run's kind registry, which views refer to.
     Watching {
         request_id: RequestId,
         view: View,
         pacing: Pacing,
+        kinds: Vec<Kind>,
     },
     /// Pushed by the server, not a response: the run's newest state, for viewers.
     ViewUpdate { view: View },
@@ -267,10 +269,12 @@ pub struct View {
     pub agents: Vec<AgentView>,
 }
 
-/// One agent's position in a view. `(0, 0)` is the south-west corner.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// One agent's kind and position in a view. `(0, 0)` is the south-west corner.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentView {
     pub agent_id: AgentId,
+    /// The agent's kind, declared in the `kinds` sent with `watching`.
+    pub kind: KindId,
     pub x: u32,
     pub y: u32,
 }

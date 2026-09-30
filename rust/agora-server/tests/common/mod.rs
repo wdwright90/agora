@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use agora_protocol::{
     Action, ActionEntry, AgentId, CatalogEntryId, ClientMessage, Direction, EntryResult, ErrorCode,
-    ErrorResponse, PROTOCOL_VERSION, Pacing, PacingMode, Placement, RequestId, RunId,
+    ErrorResponse, Kind, PROTOCOL_VERSION, Pacing, PacingMode, Placement, RequestId, RunId,
     ServerMessage, StateId, View,
 };
 use agora_server::{EMPTY_GRID_10X10, ServerConfig, serve};
@@ -323,9 +323,20 @@ impl Client {
 
     /// Watch the run, returning the view and pacing state in the `watching` response.
     pub async fn watch_with_pacing(&mut self) -> (View, Pacing) {
+        let (view, pacing, _) = self.watch_with_kinds().await;
+        (view, pacing)
+    }
+
+    /// Watch the run, returning the view, pacing state, and kinds in the `watching` response.
+    pub async fn watch_with_kinds(&mut self) -> (View, Pacing, Vec<Kind>) {
         let request_id = self.next_id();
         match self.exchange(&ClientMessage::Watch { request_id }).await {
-            ServerMessage::Watching { view, pacing, .. } => (view, pacing),
+            ServerMessage::Watching {
+                view,
+                pacing,
+                kinds,
+                ..
+            } => (view, pacing, kinds),
             other => panic!("expected watching, got {other:?}"),
         }
     }

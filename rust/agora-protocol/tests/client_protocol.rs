@@ -6,7 +6,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use agora_protocol::{
-    ClientMessage, ErrorCode, PROTOCOL_VERSION, ProtocolVersion, RequestId, ServerMessage, StateId,
+    ClientMessage, ErrorCode, Kind, PROTOCOL_VERSION, ProtocolVersion, RequestId, ServerMessage,
+    StateId, Unit,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -140,7 +141,7 @@ fn r05_versions_parse_as_semver_core() {
     ] {
         assert!(bad.parse::<ProtocolVersion>().is_err(), "{bad:?}");
     }
-    assert_eq!(PROTOCOL_VERSION.to_string(), "0.5.0");
+    assert_eq!(PROTOCOL_VERSION.to_string(), "0.6.0");
 }
 
 #[test]
@@ -149,8 +150,9 @@ fn r06_mvp_compatibility_requires_an_exact_match() {
     assert!(v.is_compatible_with(v));
     for other in [
         ProtocolVersion::new(0, 4, 0),
-        ProtocolVersion::new(0, 5, 1),
-        ProtocolVersion::new(0, 6, 0),
+        ProtocolVersion::new(0, 5, 0),
+        ProtocolVersion::new(0, 6, 1),
+        ProtocolVersion::new(0, 7, 0),
         ProtocolVersion::new(1, 5, 0),
     ] {
         assert!(!v.is_compatible_with(other), "{other}");
@@ -194,6 +196,26 @@ fn r09_agent_limit_codes_carry_their_prefix() {
         ErrorCode::DistanceBudgetExceeded.as_str(),
         "agent_limit.distance_budget_exceeded"
     );
+}
+
+#[test]
+fn r12_hue_and_size_accept_zero_to_one_inclusive() {
+    let kind = |hue: &str, size: &str| {
+        serde_json::from_str::<Kind>(&format!(
+            r#"{{ "category": "creature", "kind": "agent", "appearance": {{ "hue": {hue}, "size": {size}, "shape": "agent" }} }}"#
+        ))
+    };
+    for (hue, size) in [("0", "1"), ("1.0", "0.0"), ("0.5", "0.25")] {
+        let Kind::Creature { appearance, .. } = kind(hue, size).unwrap() else {
+            panic!("expected a creature");
+        };
+        assert_eq!(appearance.hue.get(), hue.parse::<f64>().unwrap());
+        assert_eq!(appearance.size.get(), size.parse::<f64>().unwrap());
+    }
+    for (hue, size) in [("-0.0001", "0.5"), ("0.5", "1.0001"), ("2", "0.5")] {
+        assert!(kind(hue, size).is_err(), "hue {hue}, size {size}");
+    }
+    assert_eq!(Unit::new(f64::NAN), None);
 }
 
 #[test]

@@ -7,6 +7,7 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+agora-env.workspace = true
 agora-protocol.workspace = true
 agora-sim.workspace = true
 clap.workspace = true

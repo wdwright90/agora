@@ -20,6 +20,8 @@ This spec defines the observable behavior of the [simulation component](../cdd.m
 - advancing a step with MVP move actions
 - viewer state
 - immediate agent removal, used for session-expiry cleanup
+- agent kinds, from the run's kind registry ([SPEC-006](kinds-and-appearance.md))
+- reflection of simulation components, for inspection
 
 It is extended feature by feature. Each change updates these requirements together with the implementation and its tests.
 
@@ -43,7 +45,7 @@ Server responsibilities are out of scope: connections, authority, pacing, deadli
 
 ### Creation and coordinates
 
-- **SPEC-001-R01:** Creating a simulation takes a grid width, a height, and a run seed. The new simulation is in setup at state 0 with no agents. A zero width or height is rejected with a configuration error. So are dimensions whose cell count cannot be represented on the platform.
+- **SPEC-001-R01:** Creating a simulation takes a grid width, a height, a run seed, a kind registry ([SPEC-006](kinds-and-appearance.md)), and the agent kind. The new simulation is in setup at state 0 with no agents. A zero width or height is rejected with a configuration error. So are dimensions whose cell count cannot be represented on the platform, an agent kind that is not in the registry, and an agent kind that is not a creature. Every spawned agent has the agent kind.
 - **SPEC-001-R02:** Cells use unsigned `(x, y)` coordinates. `(0, 0)` is the south-west corner; `x` grows east and `y` grows north. North is `y + 1`, east is `x + 1`, south is `y − 1`, and west is `x − 1`. A cell is in bounds when `x < width` and `y < height`.
 
 ### Spawning
@@ -93,11 +95,15 @@ Server responsibilities are out of scope: connections, authority, pacing, deadli
 
 ### Viewer state
 
-- **SPEC-001-R16:** In any phase, the viewer state returns the current state ID, the grid dimensions, and every agent's ID and position in ascending ID order. It is separate from agent observations.
+- **SPEC-001-R16:** In any phase, the viewer state returns the current state ID, the grid dimensions, and every agent's ID, kind, and position in ascending ID order. It is separate from agent observations. The simulation also exposes its kind registry.
 
 ### Removal
 
 - **SPEC-001-R18:** Removing an agent takes effect immediately, in any phase. It frees the agent's cell and discards any accepted action for it. It executes no step, leaves the state ID unchanged, and produces no observation. Removed agents' IDs are not reused. Removing an agent that does not exist returns an unknown-agent error. After removal, readiness no longer waits for the agent, and a started run whose last agent is removed is started-empty. This is the server-driven session-expiry cleanup: the server removes an expired session's agents promptly, as the SADD's [session-expiry rule](../../../architecture/sadd.md#simulation-step-coordination) requires. Operations are synchronous, so no step is ever executing when it is called. Client-requested removal, which waits for the post-action boundary, is a separate operation that is not built yet.
+
+### Inspection
+
+- **SPEC-001-R19:** Every component on a simulation entity derives Bevy's `Reflect` and is registered in the simulation world's type registry, so inspection can dump an entity's actual components ([ADR-002](../../../decisions/0002-inspection-and-debug-visualization.md)). The debug channel that uses this is not built yet.
 
 ### Reproducibility
 
@@ -105,15 +111,15 @@ Server responsibilities are out of scope: connections, authority, pacing, deadli
 
 ## Interfaces and data
 
-The Rust API is `agora_sim::Simulation`. Operation names map to `new`, `spawn`, `start`, `submit`, `readiness`, `advance`, `view`, `remove`, and `agent_count`. Error variants correspond to the error names above. These are internal package interfaces, not wire contracts.
+The Rust API is `agora_sim::Simulation`. Operation names map to `new`, `spawn`, `start`, `submit`, `readiness`, `advance`, `view`, `remove`, `kinds`, and `agent_count`. Error variants correspond to the error names above. These are internal package interfaces, not wire contracts.
 
 ## Acceptance criteria and verification
 
-Tests are in `rust/agora-sim/tests/lifecycle_and_movement.rs`. Each test name starts with the requirement ID it checks.
+Tests are in `rust/agora-sim/tests/lifecycle_and_movement.rs`, except R19's, which inspects the world from a unit test in `rust/agora-sim/src/simulation.rs`. Each test name starts with the requirement ID it checks.
 
 | Requirement | Check and expected outcome | Test |
 | --- | --- | --- |
-| R01 | New simulation is in setup at state 0 with no agents; zero dimensions are rejected. | `r01_*` |
+| R01 | New simulation is in setup at state 0 with no agents; zero dimensions, an unknown agent kind, and an agent kind that is not a creature are rejected. | `r01_*` |
 | R02 | Each direction moves along the documented axis. | `r02_*` |
 | R03 | Explicit spawn succeeds; out-of-bounds and occupied cells fail without changes. | `r03_*` |
 | R04 | Random spawns fill every free cell and then report no free cell; picks cover the free cells. | `r04_*` |
@@ -126,8 +132,9 @@ Tests are in `rust/agora-sim/tests/lifecycle_and_movement.rs`. Each test name st
 | R11 | Advancing before the run is ready fails without changes. | `r11_*` |
 | R12, R13, R14 | Blocked moves and edges fail. Contested cells and follow-the-leader moves produce both possible outcomes depending on shuffle order, and cells are never shared. | `r12_*`, `r13_*`, `r14_*` |
 | R15 | The state ID increments, observations carry N+1, and actions clear. | `r15_*` |
-| R16 | View contents in setup and after steps. | `r16_*` |
+| R16 | View contents, including each agent's kind, in setup and after steps. | `r16_*` |
 | R17 | Identical seeds and inputs give identical histories; different seeds can differ. | `r17_*` |
+| R19 | Every component on an agent entity is registered for reflection. | `r19_*` (unit test) |
 | R18 | Removal frees the cell without changing the state or reusing the ID; unknown agents fail; a removed agent's action is discarded; removing the only missing agent makes the run ready; removing every agent leaves it started-empty. | `r18_*` |
 
 ## Open questions

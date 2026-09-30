@@ -3,11 +3,14 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+use agora_env::KindId;
+use bevy_reflect::Reflect;
+
 /// Maximum total movement distance an MVP agent may request in one step.
 pub const MOVEMENT_BUDGET: u32 = 1;
 
 /// Run-unique agent identifier, assigned in spawn order starting at 1.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Reflect)]
 pub struct AgentId(pub u64);
 
 impl fmt::Display for AgentId {
@@ -27,7 +30,7 @@ impl fmt::Display for StateId {
 }
 
 /// Grid cell coordinates. `(0, 0)` is the south-west corner; `x` grows east and `y` grows north.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Reflect)]
 pub struct GridPos {
     pub x: u32,
     pub y: u32,
@@ -144,9 +147,10 @@ impl Readiness {
 }
 
 /// One agent in a viewer state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentView {
     pub id: AgentId,
+    pub kind: KindId,
     pub position: GridPos,
 }
 

@@ -147,3 +147,8 @@ opaque_string!(
     /// Environment catalog entry identifier.
     CatalogEntryId
 );
+
+opaque_string!(
+    /// Kind identifier, declared once in the run's kind registry.
+    KindId
+);

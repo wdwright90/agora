@@ -5,15 +5,17 @@
 
 mod error;
 mod ids;
+mod kinds;
 mod message;
 mod pacing;
 mod version;
 
 pub use error::{ErrorCode, ErrorResponse};
 pub use ids::{
-    AgentId, CatalogEntryId, EmptyId, MAX_SAFE_INTEGER, OutOfRange, RequestId, RunId, SessionId,
-    StateId,
+    AgentId, CatalogEntryId, EmptyId, KindId, MAX_SAFE_INTEGER, OutOfRange, RequestId, RunId,
+    SessionId, StateId,
 };
+pub use kinds::{Appearance, Kind, Shape, TerrainClass, Unit, UnitOutOfRange};
 pub use message::{
     Action, ActionEntry, AgentObservation, AgentView, ClientMessage, CloseReason, Direction,
     EntryError, EntryResult, Observation, Placement, RunPhase, ServerMessage, View,

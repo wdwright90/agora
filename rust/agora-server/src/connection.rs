@@ -370,10 +370,11 @@ impl SessionLink {
                 .run
                 .watch(self.id.clone(), self.connection, self.view_slot.clone())
                 .await
-                .map(|(view, pacing)| ServerMessage::Watching {
+                .map(|watched| ServerMessage::Watching {
                     request_id: id,
-                    view,
-                    pacing,
+                    view: watched.view,
+                    pacing: watched.pacing,
+                    kinds: watched.kinds,
                 }),
             ClientMessage::ClaimPacing { .. } => {
                 self.run.claim_pacing(self.id.clone()).await.map(|result| {

@@ -4,8 +4,8 @@ The M2 chunks, in dependency order. Each is one or two PRs, agreed before implem
 
 | # | Chunk | Contents | Status |
 | --- | --- | --- | --- |
-| 1 | Run lifecycle | `leave_run`, `close_run`, the `run_closed` push, closing a setup run whose creator expires or leaves, sequential sessions per connection | in review |
-| 2 | Registry and appearance | registered kinds (terrain, items, creatures) with appearance as the single source of truth; `Reflect` on simulation components (ADR-002) | planned |
+| 1 | Run lifecycle | `leave_run`, `close_run`, the `run_closed` push, closing a setup run whose creator expires or leaves, sequential sessions per connection | merged (#17) |
+| 2 | Registry and appearance | registered kinds (terrain, items, creatures) with appearance as the single source of truth; `Reflect` on simulation components (ADR-002) | in review (#18) |
 | 3 | Environment definitions | layout and ecology rules as data, in a data-only environment package; catalog entries built from definitions | planned |
 | 4 | Metabolism and food | energy decay and move cost, diets, food items, automatic eating, starvation with removal and the `agent_removed {reason}` push (moved from chunk 1, which had no producer for it), the food respawn rule | planned |
 | 5 | Sight | line of sight, the three-slot structured grid, edges as walls, radius as a sight stat | planned |

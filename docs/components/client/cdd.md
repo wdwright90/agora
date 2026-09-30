@@ -46,7 +46,7 @@ Failures are `ClientError` values: a transport failure, a server rejection carry
 - **Connect:** open the WebSocket, send `hello`, and require `welcome`.
 - **Establish:** start the connection task, send `create_run` or `join_run` as request 1, and return the session, with the server's session information, and its observation stream.
 - **Request:** queue the request with the next number and a reply slot, then wait. The connection task writes it and, when the response arrives, completes the reply slot. A server `error` becomes `ClientError::Rejected`.
-- **Push:** `observations` go to the stream. `view_update` and `pacing_update` replace the latest values. A `watching` response fills both handles before the caller sees it.
+- **Push:** `observations` go to the stream. `view_update` and `pacing_update` replace the latest values. A `watching` response fills both handles, and sets the run's kinds (`Session::kinds`), before the caller sees it. Kinds do not change during a run, so they are held once rather than in a latest-value handle.
 - **Close:** when the session leaves or closes its run, or the server sends `run_closed`, the connection task closes the socket. When the socket closes for any reason, waiting and later requests fail, with `ClientError::RunClosed` if the server closed the run and `ClientError::Closed` otherwise, and the observation stream ends after any batches already received. Dropping every clone of the session also closes the connection.
 
 ## The demo client

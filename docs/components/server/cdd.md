@@ -27,7 +27,7 @@ The `agora-server` package (`rust/agora-server`) implements this component as a 
 - **Request log:** tracks a session's highest admitted request ID and its most recent results, and decides whether a request is new, a retry to replay, or a rejected ID ([SPEC-002-R07](../../contracts/client-protocol.md#requests-and-sessions)).
 - **Run task:** one per run. It owns the run's `Simulation`, its sessions (creator flag, owned agents, outbox and view slot while connected, and expiry deadline), the run's release deadline, and the time of its last step for the step interval. It handles commands from connection tasks one at a time through a channel, which serializes every call into the simulation as [SPEC-001](../simulation/specs/lifecycle-and-movement.md) requires. Each run has its own task, so runs never share an action barrier.
 - **Registry:** the table of live runs by ID, shared by all connections. A run task removes itself when the run is released.
-- **Catalog:** the bundled environment entries. There is one, `empty-grid-10x10`.
+- **Catalog:** the bundled environment entries. There is one, `empty-grid-10x10`, which uses the built-in kinds from `agora-env`.
 
 ## Interfaces and dependencies
 
@@ -37,13 +37,13 @@ Connection tasks talk to run tasks through a handle with asynchronous `join`, `s
 
 ## Data flow and lifecycle
 
-- **Create:** the connection looks up the catalog entry, then creates the simulation with a seed from OS randomness. It registers the run and starts its task with the creator's session. The seed is logged so a run can be reproduced.
+- **Create:** the connection looks up the catalog entry, then creates the simulation with a seed from OS randomness and the entry's kinds. The run keeps the kinds in wire form for viewers. It registers the run and starts its task with the creator's session. The seed is logged so a run can be reproduced.
 - **Join:** the connection finds the run in the registry and asks its task for a new session.
 - **Spawn and Start:** the run task applies them to the simulation, records ownership, and checks creator authority and Start eligibility. Start delivers the initial observations.
 - **Submit:** the run task checks the phase and target state for the whole request, then checks ownership and submits each entry to the simulation in order. It replies with the per-entry results, then advances if the run is ready.
 - **Advance and deliver:** when every agent has an accepted action, the run task asks the pacer whether the step may start. If so, it executes the step and pushes each connected session its own agents' observations. If an interval holds the step, it sets a deadline and checks again when the deadline fires; if the run is paused, it waits for a pacing request.
 - **Pacing:** the pacer holds the mode, the controller, any granted single step, and when the last step started. Claims, mode changes, and grants from connections update it, and each change is pushed to every viewer as that viewer sees it.
-- **Watch and publish:** a watching session receives the current view in its response. After every spawn, Start, step, and expiry removal, the run task publishes the new view to each viewer's slot, replacing any view not yet sent.
+- **Watch and publish:** a watching session receives the current view and the run's kinds in its response. After every spawn, Start, step, and expiry removal, the run task publishes the new view to each viewer's slot, replacing any view not yet sent.
 - **Disconnect:** when a connection closes, its session stays in the run without a connection, and its outbox and view slot are dropped. The session's expiry timer starts. If it held pacing control, control passes to the remaining viewer with the oldest connection. If it was the last viewer, pacing becomes unlimited and a waiting step executes.
 - **Session expiry:** when the timer fires, the session is removed and its agents are removed from the simulation. If the run was waiting only for those agents, the step executes.
 - **Leave:** the session is removed at once, with its agents; pacing control passes on if needed, and a waiting step may execute. The connection sends anything the run already queued for the session, then `left`, and returns to having no session.

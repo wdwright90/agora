@@ -3,7 +3,7 @@
 use std::sync::{Arc, Mutex, PoisonError};
 
 use agora_protocol::{
-    ActionEntry, AgentId, CatalogEntryId, ClientMessage, CloseReason, EntryResult,
+    ActionEntry, AgentId, CatalogEntryId, ClientMessage, CloseReason, EntryResult, Kind,
     PROTOCOL_VERSION, Pacing, PacingMode, Placement, RequestId, RunId, RunPhase, ServerMessage,
     SessionId, StateId, View,
 };
@@ -12,7 +12,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 
-use crate::connection::{self, ClosedReason, ObservationBatch, Outgoing, Pushes, Socket};
+use crate::connection::{self, ClosedReason, Kinds, ObservationBatch, Outgoing, Pushes, Socket};
 use crate::error::ClientError;
 
 /// A connection that has completed the version handshake but has no session yet.
@@ -66,6 +66,7 @@ impl Client {
         let (observations_sender, observations) = mpsc::unbounded_channel();
         let (view_sender, view) = watch::channel(None);
         let (pacing_sender, pacing) = watch::channel(None);
+        let kinds = Kinds::default();
         let closed = ClosedReason::default();
         tokio::spawn(connection::run(
             self.socket,
@@ -74,6 +75,7 @@ impl Client {
                 observations: observations_sender,
                 view: view_sender,
                 pacing: pacing_sender,
+                kinds: kinds.clone(),
                 closed: closed.clone(),
             },
         ));
@@ -112,6 +114,7 @@ impl Client {
             requests: Arc::new(requests),
             view,
             pacing,
+            kinds,
         };
         Ok((
             session,
@@ -144,6 +147,7 @@ pub struct Session {
     requests: Arc<Requests>,
     view: watch::Receiver<Option<View>>,
     pacing: watch::Receiver<Option<Pacing>>,
+    kinds: Kinds,
 }
 
 impl Session {
@@ -197,7 +201,8 @@ impl Session {
     }
 
     /// Become a viewer. Returns the current view; afterwards [`Session::view`] and
-    /// [`Session::pacing`] hold the newest view and pacing state.
+    /// [`Session::pacing`] hold the newest view and pacing state, and [`Session::kinds`] holds
+    /// the run's kinds.
     pub async fn watch(&self) -> Result<View, ClientError> {
         match self
             .call(|request_id| ClientMessage::Watch { request_id })
@@ -273,6 +278,12 @@ impl Session {
     /// A handle to the newest pacing state. It is `None` until the session watches.
     pub fn pacing(&self) -> watch::Receiver<Option<Pacing>> {
         self.pacing.clone()
+    }
+
+    /// The run's kinds, which views refer to. `None` until the session watches; they do not
+    /// change afterwards.
+    pub fn kinds(&self) -> Option<&[Kind]> {
+        self.kinds.get().map(Vec::as_slice)
     }
 
     async fn expect_ok(
