@@ -1,10 +1,10 @@
 # Handoff
 
-Checkpoint: 2026-09-29, chunks 1 and 2 merged as #17 and #18. Chunk 3 (environment definitions) is implemented and verified on branch `feature/env-definitions`, not yet committed or opened as a PR.
+Checkpoint: 2026-09-29, chunks 1 and 2 merged as #17 and #18. Chunk 3 (environment definitions) is open as #19 on branch `feature/env-definitions`.
 
 ## Resume here
 
-Review chunk 3 with the maintainer, commit it, and open the PR against `develop` once they agree. Then record the PR number here and in the plan, and agree the scope of chunk 4 (metabolism and food), which also settles how a catalog entry combines a layout with ecology rules ([SPEC-007 open questions](../../docs/components/simulation/specs/environment-definitions.md#open-questions)).
+Check #19's review comments with `gh pr view 19 --comments` and `gh api repos/wdwright90/agora/pulls/19/comments`, and agree any changes before making them. Until #19 merges, this handoff is newer on `feature/env-definitions` than on `develop`. Once it merges, update the plan's status column and the work index, then agree the scope of chunk 4 (metabolism and food), which also settles how a catalog entry combines a layout with ecology rules ([SPEC-007 open questions](../../docs/components/simulation/specs/environment-definitions.md#open-questions)).
 
 ## Chunk 3
 
