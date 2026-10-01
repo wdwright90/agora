@@ -6,6 +6,7 @@
 //! Networking, authority, pacing, and rendering live in other packages.
 
 mod error;
+mod schedule;
 mod simulation;
 mod types;
 

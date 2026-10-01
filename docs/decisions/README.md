@@ -6,3 +6,4 @@ ADRs explain why a choice was made. The SADD and CDDs describe the current accep
 
 - [ADR-001 — Rust package boundaries](0001-rust-package-boundaries.md) (accepted).
 - [ADR-002 — Simulation inspection and debug visualization](0002-inspection-and-debug-visualization.md) (accepted).
+- [ADR-003 — Simulation step stages](0003-simulation-step-stages.md) (accepted).
