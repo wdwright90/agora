@@ -10,7 +10,7 @@ The maintainer agreed these decisions on 2026-09-27, while planning the mileston
 
 ## Metabolism and food
 
-- An agent's **metabolism** is a capability set at spawn, with defaults from the environment. It holds an energy level from 0 to 1, a per-step decay, an extra cost for moving, and a **diet**.
+- An agent's **metabolism** is a capability set at spawn, with defaults from the environment (revised on 2026-09-30: a built-in default, not the environment's; see [chunk 4 decisions](#chunk-4-decisions)). It holds an energy level from 0 to 1, a per-step decay, an extra cost for moving, and a **diet**.
 - A **diet** maps food kinds to an efficiency: 0 means the agent cannot eat that kind, and a negative value could later mean poison. It can grow into several nutrients digested differently.
 - **Food items** have a kind and a nutrition value, lie in cells, and do not block movement. A cell holds at most one item.
 - **Eating is automatic** for now: an agent that ends its move on an item it can eat consumes it and gains nutrition × efficiency, capped at full. Items it cannot eat stay. An explicit `eat` action may come later.
@@ -85,7 +85,7 @@ Adding a shape or terrain class adds layers, which is a capability version chang
 
 ## Environments and ecology
 
-- An environment is a **layout** (the grid and its walls) plus **ecology rules** (for example, keep 12 berries on the map, respawning at random free cells). A catalog entry names a combination, so the same layout can appear with and without food. Composing rule sets freely is M7.
+- (Refined on 2026-09-30 into separate layout and ecology files; see [chunk 4 decisions](#chunk-4-decisions).) An environment is a **layout** (the grid and its walls) plus **ecology rules** (for example, keep 12 berries on the map, respawning at random free cells). A catalog entry names a combination, so the same layout can appear with and without food. Composing rule sets freely is M7.
 - The **simulation manages** ecology through rules: Rust systems configured by the environment definition, using the run's seeded random streams. New kinds of rule need Rust code; configuring existing rules is data.
 - A privileged **director and editing API** (for curricula, experiments, and viewer editing) is the long-term plan, in M7.
 - Environment definitions move into their own data-only package, as discussed on PR #5: its trigger, a real definition format, is met by this milestone.
@@ -106,9 +106,39 @@ Adding a shape or terrain class adds layers, which is a capability version chang
 - Training runs several environments in parallel as separate runs. Watching a training run would slow it to the viewer's interval, so the trainer's "play" mode runs a saved policy in its own run for the viewer to join.
 - Reward is computed by the trainer from observations; the simulation reports what happened and does not score it.
 
+## Chunk 4 decisions
+
+Agreed with the maintainer on 2026-09-30, while scoping chunk 4.
+
+**Delivery.** Chunk 4 is four PRs: step stages, modular definitions, metabolism, and food ([plan](plan.md)).
+
+**Step stages** ([ADR-003](../../docs/decisions/0003-simulation-step-stages.md), [CDD-001](../../docs/components/simulation/cdd.md#step-stages)):
+
+- A step is a fixed sequence of stages, and every new system is placed in one: Actions, Interactions, Metabolism, Removal, Ecology, Membership, Commit, then Perception. The order must stay easy to read and adjust, so it is set in one list, and a test compares it with the CDD's table.
+- Ordering across stages matters more than within one; conflicting systems within a stage must declare their order.
+- One thread per run for now. The maintainer will often train a single agent over sequential runs, where parallelism across runs does not help, so multithreading inside a run should stay possible; the ambiguity checks and per-system random streams keep it a configuration change. To revisit once a step does enough work to measure.
+- Energy does not decay while paused: a pause runs no stages.
+- The word *stage* was chosen during implementation because CDD-001 already calls setup, collection, and execution *phases*.
+
+**Modular definitions:**
+
+- Layouts and ecologies are separate files, each with its own IDs. An environment file names the layout and the optional ecology it combines. The maintainer wants this flexibility early, and expects more axes of control later, so the format stays modular.
+- An **ecology sets the properties of non-agent things**, such as a berry's nutrition, as well as its rules, so food can be tuned across training environments easily. A consequence: the same kind can be worth different amounts in different environments, and two differently nourishing foods in one environment need two kinds.
+- **The agent kind leaves the environment**, which the SADD's extension boundaries already required: environment definitions do not declare agent types. Every agent gets the built-in `agent` kind until species arrive (M3).
+
+**Metabolism and exertion:**
+
+- Metabolism is an agent property. Until capability declarations (chunk 6), every agent gets a built-in default metabolism.
+- Actions add the effort they spend to an **exertion** component, and each action owns its cost: a move adds effort per cell moved, and a failed move adds none. The Metabolism stage converts exertion to energy with the metabolism's rate (1 for now), applies decay, clears exertion, and then checks for starvation, after every energy change in the step. Metabolism therefore never needs to know which actions exist, and a later fatigue sense (M4) can read the same exertion.
+
+**Direction, not yet designed:**
+
+- Agents will eventually take several actions per step, such as moving and talking, with some actions exclusive. The candidate model is **action channels**: at most one action per channel per step, and actions in different channels combine. Exclusivity is hard to pin down with few actions, so it is a direction to design towards, not a requirement.
+- Eating may become an **explicit action**, so an agent can choose whether to eat. It stays automatic for now to make training easier, possibly kept later as an option.
+
 ## Settled with features
 
-- The exact energy numbers (decay, move cost, nutrition) and food counts per environment, tuned for training.
+- The exact energy numbers (decay, move effort, nutrition) and food counts per environment, tuned for training.
 - Capability definition format and how the server publishes it.
 - Whether `leave_run` keeps pending requests, and the exact closure reasons.
-- Whether energy decay continues while paused. Proposed: no, because decay happens per step and pacing gates steps.
+- Whether energy decay continues while paused: no, settled with the step stages (a pause runs no stages).
