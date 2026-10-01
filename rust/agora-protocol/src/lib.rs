@@ -18,7 +18,8 @@ pub use ids::{
 pub use kinds::{Appearance, Kind, Shape, TerrainClass, Unit, UnitOutOfRange};
 pub use message::{
     Action, ActionEntry, AgentObservation, AgentView, ClientMessage, CloseReason, Direction,
-    EntryError, EntryResult, Observation, Placement, RunPhase, ServerMessage, View,
+    EntryError, EntryResult, InvalidTerrain, Observation, Placement, RunPhase, ServerMessage, View,
+    Watching,
 };
 pub use pacing::{IntervalMs, Pacing, PacingMode};
 pub use version::{InvalidVersion, PROTOCOL_VERSION, ProtocolVersion};

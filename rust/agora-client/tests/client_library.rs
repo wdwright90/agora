@@ -253,6 +253,22 @@ async fn r11_kinds_are_available_after_watching_and_shared_by_clones() {
 }
 
 #[tokio::test]
+async fn r11_terrain_is_available_after_watching_and_shared_by_clones() {
+    let url = start_server().await;
+    let (viewer, _) = new_run(&url).await;
+    let clone = viewer.clone();
+    assert!(viewer.terrain().is_none());
+
+    viewer.watch().await.unwrap();
+
+    // The empty grid is all floor, the first kind.
+    let terrain = clone
+        .terrain()
+        .expect("terrain is set before watch returns");
+    assert_eq!(terrain, [0; 100]);
+}
+
+#[tokio::test]
 async fn r07_connection_loss_fails_requests_and_ends_observations() {
     let url = fake_server(
         ServerMessage::Welcome {

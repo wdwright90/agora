@@ -78,9 +78,11 @@ error_codes! {
     StartNotEligible => "start_not_eligible",
     /// The requested spawn cell is outside the grid.
     CellOutOfBounds => "cell_out_of_bounds",
+    /// The requested spawn cell's terrain blocks movement.
+    CellBlocked => "cell_blocked",
     /// The requested spawn cell is occupied.
     CellOccupied => "cell_occupied",
-    /// Random placement found no unoccupied cell.
+    /// Random placement found no unoccupied cell that terrain does not block.
     NoFreeCell => "no_free_cell",
     /// The operation is only available after Start.
     RunNotStarted => "run_not_started",

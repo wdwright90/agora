@@ -2,21 +2,7 @@
 
 use thiserror::Error;
 
-use agora_env::KindId;
-
 use crate::types::{AgentId, GridPos, StateId};
-
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-pub enum ConfigError {
-    #[error("grid dimensions must be non-zero, got {width} x {height}")]
-    EmptyGrid { width: u32, height: u32 },
-    #[error("grid dimensions {width} x {height} are too large")]
-    GridTooLarge { width: u32, height: u32 },
-    #[error("agent kind {0} is not in the kind registry")]
-    UnknownAgentKind(KindId),
-    #[error("agent kind {0} is not a creature")]
-    AgentKindNotCreature(KindId),
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum SpawnError {
@@ -24,6 +10,8 @@ pub enum SpawnError {
     NotInSetup,
     #[error("cell {0} is outside the grid")]
     OutOfBounds(GridPos),
+    #[error("cell {0} has terrain that blocks movement")]
+    Blocked(GridPos),
     #[error("cell {0} is occupied")]
     Occupied(GridPos),
     #[error("no unoccupied cell is available")]

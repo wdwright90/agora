@@ -24,7 +24,7 @@ const LONG: Duration = Duration::from_secs(60);
 const SETTLE: Duration = Duration::from_millis(400);
 
 #[tokio::test]
-async fn r01_the_bundled_entry_is_an_empty_10_by_10_grid() {
+async fn r01_the_empty_grid_entry_is_an_open_10_by_10_grid() {
     let address = start_default_server().await;
     let (mut client, _) = Client::with_new_run(address).await;
 
@@ -35,6 +35,21 @@ async fn r01_the_bundled_entry_is_an_empty_10_by_10_grid() {
     for placement in [cell(10, 0), cell(0, 10)] {
         expect_code(client.spawn(placement).await, ErrorCode::CellOutOfBounds);
     }
+}
+
+#[tokio::test]
+async fn r01_the_divided_entry_has_a_wall_with_a_gap() {
+    let address = start_default_server().await;
+    let (mut client, _) = Client::with_new_run_from(address, common::divided()).await;
+
+    for y in [0, 3, 6, 9] {
+        expect_code(client.spawn(cell(5, y)).await, ErrorCode::CellBlocked);
+    }
+    for placement in [cell(5, 4), cell(5, 5), cell(4, 0), cell(6, 9), cell(9, 9)] {
+        let reply = client.spawn(placement).await;
+        assert!(matches!(reply, ServerMessage::Spawned { .. }), "{reply:?}");
+    }
+    expect_code(client.spawn(cell(10, 0)).await, ErrorCode::CellOutOfBounds);
 }
 
 #[tokio::test]

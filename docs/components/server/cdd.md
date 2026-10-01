@@ -27,7 +27,7 @@ The `agora-server` package (`rust/agora-server`) implements this component as a 
 - **Request log:** tracks a session's highest admitted request ID and its most recent results, and decides whether a request is new, a retry to replay, or a rejected ID ([SPEC-002-R07](../../contracts/client-protocol.md#requests-and-sessions)).
 - **Run task:** one per run. It owns the run's `Simulation`, its sessions (creator flag, owned agents, outbox and view slot while connected, and expiry deadline), the run's release deadline, and the time of its last step for the step interval. It handles commands from connection tasks one at a time through a channel, which serializes every call into the simulation as [SPEC-001](../simulation/specs/lifecycle-and-movement.md) requires. Each run has its own task, so runs never share an action barrier.
 - **Registry:** the table of live runs by ID, shared by all connections. A run task removes itself when the run is released.
-- **Catalog:** the bundled environment entries. There is one, `empty-grid-10x10`, which uses the built-in kinds from `agora-env`.
+- **Catalog:** the bundled environment entries, loaded once from `agora-env`'s bundled definitions with the built-in kinds: `empty-grid-10x10` and `divided-10x10`.
 
 ## Interfaces and dependencies
 
@@ -37,7 +37,7 @@ Connection tasks talk to run tasks through a handle with asynchronous `join`, `s
 
 ## Data flow and lifecycle
 
-- **Create:** the connection looks up the catalog entry, then creates the simulation with a seed from OS randomness and the entry's kinds. The run keeps the kinds in wire form for viewers. It registers the run and starts its task with the creator's session. The seed is logged so a run can be reproduced.
+- **Create:** the connection looks up the catalog entry, then creates the simulation from the entry's environment with a seed from OS randomness. The run keeps the kinds in wire form for viewers, and gives each new viewer the simulation's current terrain. It registers the run and starts its task with the creator's session. The seed is logged so a run can be reproduced.
 - **Join:** the connection finds the run in the registry and asks its task for a new session.
 - **Spawn and Start:** the run task applies them to the simulation, records ownership, and checks creator authority and Start eligibility. Start delivers the initial observations.
 - **Submit:** the run task checks the phase and target state for the whole request, then checks ownership and submits each entry to the simulation in order. It replies with the per-entry results, then advances if the run is ready.

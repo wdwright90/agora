@@ -12,7 +12,7 @@ packages: [agora-server]
 
 This spec defines the [server's](../cdd.md) behavior that is not part of the wire contract. It covers:
 
-- the bundled catalog
+- the bundled catalog, built from the bundled environment definitions
 - run and session identifiers
 - creator authority and agent ownership
 - Start eligibility
@@ -40,7 +40,7 @@ The SADD and CDD describe further behavior that is not yet covered here and is n
 
 ### Catalog and identifiers
 
-- **SPEC-003-R01:** The catalog has one entry, `empty-grid-10x10`: an empty, bounded grid 10 cells wide and 10 cells high, with the built-in kinds ([SPEC-006-R04](../../simulation/specs/kinds-and-appearance.md#built-in-kinds)), whose agents have the `agent` kind. Each run's simulation seed comes from OS randomness and is written to the server log.
+- **SPEC-003-R01:** The catalog has one entry for each bundled environment definition, with the definition's ID, loaded with the built-in kinds ([SPEC-007-R06](../../simulation/specs/environment-definitions.md#bundled-definitions)): `empty-grid-10x10`, an open 10 × 10 floor, and `divided-10x10`, a 10 × 10 floor divided by a wall with a gap. A run is created from its entry's environment. Each run's simulation seed comes from OS randomness and is written to the server log.
 - **SPEC-003-R02:** Run IDs and session IDs are assigned by the server and are unique. Clients treat them as opaque strings. Each successful `join_run` creates a new session.
 
 ### Authority and ownership
@@ -59,7 +59,7 @@ The SADD and CDD describe further behavior that is not yet covered here and is n
 
 ### Viewers
 
-- **SPEC-003-R10:** Any session can become a viewer with `watch`, including one that owns agents. The response carries the current view and the run's kinds. Afterwards the viewer receives a `view_update` after every change to the view: a spawn, Start, a step, and the removal of an expired session's agents. Each viewer holds only the newest view it has not yet been sent, so a slow viewer skips intermediate views rather than queueing them or delaying the run.
+- **SPEC-003-R10:** Any session can become a viewer with `watch`, including one that owns agents. The response carries the current view, the run's kinds, and its current terrain. Afterwards the viewer receives a `view_update` after every change to the view: a spawn, Start, a step, and the removal of an expired session's agents. Each viewer holds only the newest view it has not yet been sent, so a slow viewer skips intermediate views rather than queueing them or delaying the run.
 
 ### Pacing
 
@@ -93,7 +93,7 @@ Tests are in `rust/agora-server/tests/sessions_and_runs.rs` and start a server o
 
 | Requirement | Check and expected outcome | Test |
 | --- | --- | --- |
-| R01 | Corner cells of the bundled grid spawn; cells at x = 10 or y = 10 are out of bounds. | `r01_*` |
+| R01 | Corner cells of the empty grid spawn; cells at x = 10 or y = 10 are out of bounds. In the divided grid, wall cells are blocked and the gap and floor cells spawn. | `r01_*` |
 | R02 | Run IDs and session IDs from several creates and joins are all distinct. | `r02_*` |
 | R03 | A joining session's Start returns `not_creator`; the creator's succeeds. A non-owner's entry returns `agent_not_owned`; the owner's is accepted. | `r03_*` |
 | R04 | Start with no agents returns `start_not_eligible` and leaves setup; a connected viewer makes it eligible and a disconnected one doesn't; a second Start returns `run_already_started`. | `r04_*` |
@@ -101,7 +101,7 @@ Tests are in `rust/agora-server/tests/sessions_and_runs.rs` and start a server o
 | R06 | A disconnected session that has not expired keeps its run. An expired session's agent is removed, and a step waiting for it executes. A creator expiring in setup closes the run with `creator_expired`. | `r06_*`, `r07_joining_before_release_keeps_the_run` |
 | R07 | A run is released after its sessions expire, including while waiting for actions; a join during the release timeout keeps it; a connected session keeps it. | `r07_*` |
 | R08, R09 | No step executes until every agent has an accepted action; then each session receives only its own agents' observations, a session without agents receives none, and collection targets the next state. | `r08_r09_*` |
-| R10 | Viewers receive the current view and the run's kinds, and a view after each change. Covered by the SPEC-002 server tests `r12_*`. Holding only the newest view comes from the channel type (a Tokio `watch` channel) and is not tested directly. | server `r12_*` in `client_protocol.rs` |
+| R10 | Viewers receive the current view, the run's kinds, and its terrain, and a view after each change. Covered by the SPEC-002 server tests `r12_*`. Holding only the newest view comes from the channel type (a Tokio `watch` channel) and is not tested directly. | server `r12_*` in `client_protocol.rs` |
 | R11, R12 | With a viewer and a long interval, a ready step waits, then executes once the last viewer disconnects; with a short interval it executes after the interval; without viewers it is not held; a new first viewer resets the mode to the default interval with no controller. | `r11_*`, `r12_*` |
 | R13 | Control passes to the remaining viewer with the oldest connection, not the one that watched first, and the mode is kept; its control then rejects other claims. Claim errors are covered by SPEC-002 server `r13_*`. | `r13_*` |
 | R15 | Leaving removes the session's agents and lets a waiting step execute; the last session leaving releases the run at once; a creator leaving setup closes the run with `creator_left`; a controller leaving hands over pacing control. | `r15_*` |

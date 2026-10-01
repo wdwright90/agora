@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use agora_protocol::{
     AgentObservation, ClientMessage, CloseReason, Kind, Pacing, RequestId, ServerMessage, StateId,
-    View,
+    View, Watching,
 };
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::TcpStream;
@@ -38,14 +38,21 @@ pub struct Pushes {
     pub observations: mpsc::UnboundedSender<ObservationBatch>,
     pub view: watch::Sender<Option<View>>,
     pub pacing: watch::Sender<Option<Pacing>>,
-    /// The run's kinds, set by the first `watching` response.
-    pub kinds: Kinds,
+    /// The run's kinds and terrain, set by the first `watching` response.
+    pub watched: WatchedRun,
     /// Set when the server closes the run, so later requests can report why.
     pub closed: ClosedReason,
 }
 
-/// The run's kinds, once the session has watched. They do not change during a run.
-pub type Kinds = Arc<OnceLock<Vec<Kind>>>;
+/// The run's kinds and terrain, from the first `watching` response.
+pub struct RunInfo {
+    pub kinds: Vec<Kind>,
+    pub terrain: Vec<u32>,
+}
+
+/// The run's kinds and terrain, once the session has watched. Neither changes during a run
+/// yet.
+pub type WatchedRun = Arc<OnceLock<RunInfo>>;
 
 /// Why the server closed the session's run, once it has.
 pub type ClosedReason = Arc<Mutex<Option<CloseReason>>>;
@@ -143,14 +150,18 @@ fn dispatch(
             *pushes.closed.lock().unwrap_or_else(PoisonError::into_inner) = Some(*reason);
             return Session::Ended;
         }
-        ServerMessage::Watching {
+        ServerMessage::Watching(Watching {
             view,
             pacing,
             kinds,
+            terrain,
             ..
-        } => {
+        }) => {
             // Fill the handles before the caller sees the response.
-            let _ = pushes.kinds.set(kinds.clone());
+            let _ = pushes.watched.set(RunInfo {
+                kinds: kinds.clone(),
+                terrain: terrain.clone(),
+            });
             pushes.view.send_replace(Some(view.clone()));
             pushes.pacing.send_replace(Some(*pacing));
             message.request_id()

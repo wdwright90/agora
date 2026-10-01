@@ -9,9 +9,7 @@ mod error;
 mod simulation;
 mod types;
 
-pub use error::{
-    AdvanceError, AgentLimitError, ConfigError, RemoveError, SpawnError, StartError, SubmitError,
-};
+pub use error::{AdvanceError, AgentLimitError, RemoveError, SpawnError, StartError, SubmitError};
 pub use simulation::{SimConfig, Simulation};
 pub use types::{
     AgentId, AgentView, Direction, GridPos, MOVEMENT_BUDGET, Move, Observation, Observations,

@@ -8,10 +8,10 @@ use std::time::Duration;
 
 use agora_protocol::{
     Action, ActionEntry, AgentId, CatalogEntryId, ClientMessage, Direction, EntryResult, ErrorCode,
-    ErrorResponse, Kind, PROTOCOL_VERSION, Pacing, PacingMode, Placement, RequestId, RunId,
-    ServerMessage, StateId, View,
+    ErrorResponse, PROTOCOL_VERSION, Pacing, PacingMode, Placement, RequestId, RunId,
+    ServerMessage, StateId, View, Watching,
 };
-use agora_server::{EMPTY_GRID_10X10, ServerConfig, serve};
+use agora_server::{DIVIDED_10X10, EMPTY_GRID_10X10, ServerConfig, serve};
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::tungstenite::Message;
@@ -38,6 +38,11 @@ pub fn request_id(n: u64) -> RequestId {
 
 pub fn empty_grid() -> CatalogEntryId {
     CatalogEntryId::new(EMPTY_GRID_10X10).unwrap()
+}
+
+/// A 10 × 10 grid with a wall at x = 5, except at y = 4 and y = 5.
+pub fn divided() -> CatalogEntryId {
+    CatalogEntryId::new(DIVIDED_10X10).unwrap()
 }
 
 pub fn cell(x: u32, y: u32) -> Placement {
@@ -139,10 +144,18 @@ impl Client {
         client
     }
 
-    /// Connect, complete the handshake, and create a run on the bundled catalog entry.
+    /// Connect, complete the handshake, and create a run on the empty-grid catalog entry.
     pub async fn with_new_run(address: SocketAddr) -> (Self, RunId) {
+        Self::with_new_run_from(address, empty_grid()).await
+    }
+
+    /// Connect, complete the handshake, and create a run on `catalog_entry`.
+    pub async fn with_new_run_from(
+        address: SocketAddr,
+        catalog_entry: CatalogEntryId,
+    ) -> (Self, RunId) {
         let mut client = Self::connect_with_hello(address).await;
-        let run_id = client.create_run().await;
+        let run_id = client.create_run_from(catalog_entry).await;
         (client, run_id)
     }
 
@@ -280,11 +293,15 @@ impl Client {
     }
 
     pub async fn create_run(&mut self) -> RunId {
+        self.create_run_from(empty_grid()).await
+    }
+
+    pub async fn create_run_from(&mut self, catalog_entry: CatalogEntryId) -> RunId {
         let request_id = self.next_id();
         let reply = self
             .exchange(&ClientMessage::CreateRun {
                 request_id,
-                catalog_entry: empty_grid(),
+                catalog_entry,
             })
             .await;
         match reply {
@@ -323,20 +340,15 @@ impl Client {
 
     /// Watch the run, returning the view and pacing state in the `watching` response.
     pub async fn watch_with_pacing(&mut self) -> (View, Pacing) {
-        let (view, pacing, _) = self.watch_with_kinds().await;
-        (view, pacing)
+        let watching = self.watching().await;
+        (watching.view, watching.pacing)
     }
 
-    /// Watch the run, returning the view, pacing state, and kinds in the `watching` response.
-    pub async fn watch_with_kinds(&mut self) -> (View, Pacing, Vec<Kind>) {
+    /// Watch the run, returning the whole `watching` response.
+    pub async fn watching(&mut self) -> Watching {
         let request_id = self.next_id();
         match self.exchange(&ClientMessage::Watch { request_id }).await {
-            ServerMessage::Watching {
-                view,
-                pacing,
-                kinds,
-                ..
-            } => (view, pacing, kinds),
+            ServerMessage::Watching(watching) => watching,
             other => panic!("expected watching, got {other:?}"),
         }
     }

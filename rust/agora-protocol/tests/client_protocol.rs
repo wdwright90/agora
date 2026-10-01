@@ -141,7 +141,7 @@ fn r05_versions_parse_as_semver_core() {
     ] {
         assert!(bad.parse::<ProtocolVersion>().is_err(), "{bad:?}");
     }
-    assert_eq!(PROTOCOL_VERSION.to_string(), "0.6.0");
+    assert_eq!(PROTOCOL_VERSION.to_string(), "0.7.0");
 }
 
 #[test]
@@ -149,11 +149,11 @@ fn r06_mvp_compatibility_requires_an_exact_match() {
     let v = PROTOCOL_VERSION;
     assert!(v.is_compatible_with(v));
     for other in [
-        ProtocolVersion::new(0, 4, 0),
         ProtocolVersion::new(0, 5, 0),
-        ProtocolVersion::new(0, 6, 1),
-        ProtocolVersion::new(0, 7, 0),
-        ProtocolVersion::new(1, 5, 0),
+        ProtocolVersion::new(0, 6, 0),
+        ProtocolVersion::new(0, 7, 1),
+        ProtocolVersion::new(0, 8, 0),
+        ProtocolVersion::new(1, 7, 0),
     ] {
         assert!(!v.is_compatible_with(other), "{other}");
     }
@@ -216,6 +216,21 @@ fn r12_hue_and_size_accept_zero_to_one_inclusive() {
         assert!(kind(hue, size).is_err(), "hue {hue}, size {size}");
     }
     assert_eq!(Unit::new(f64::NAN), None);
+}
+
+#[test]
+fn r12_terrain_is_checked_against_the_view_and_kinds() {
+    // The terrain fixtures are rejected by the terrain check, not by some other defect.
+    for name in [
+        "watching_terrain_wrong_length.json",
+        "watching_terrain_index_out_of_range.json",
+        "watching_terrain_not_a_terrain_kind.json",
+    ] {
+        let path = fixture_dir("invalid", "server").join(name);
+        let text = fs::read_to_string(path).unwrap();
+        let error = serde_json::from_str::<ServerMessage>(&text).unwrap_err();
+        assert!(error.to_string().contains("terrain"), "{name}: {error}");
+    }
 }
 
 #[test]

@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::future;
 
-use agora_env::{KindRegistry, Look, TerrainClass};
+use agora_env::{Environment, KindRegistry, Look, TerrainClass};
 use agora_protocol::{
     AgentObservation, AgentView, Appearance, CatalogEntryId, CloseReason, IntervalMs, Kind, KindId,
     Observation, Pacing, PacingMode, RunId, RunPhase, ServerMessage, SessionId, Shape, StateId,
@@ -21,7 +21,6 @@ use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{Instant, sleep_until};
 use tracing::{Instrument, debug, info, info_span};
 
-use crate::catalog::CatalogEntry;
 use crate::config::ServerConfig;
 use crate::pacing::{Gate, Pacer, PacingRejection};
 use crate::registry::Registry;
@@ -38,11 +37,13 @@ pub type Outbox = mpsc::UnboundedSender<ServerMessage>;
 /// slow viewer skips states instead of queueing them.
 pub type ViewSlot = watch::Sender<Option<View>>;
 
-/// What a new viewer receives: the current view and pacing state, and the run's kinds.
+/// What a new viewer receives: the current view and pacing state, the run's kinds, and the
+/// current terrain.
 pub struct Watched {
     pub view: View,
     pub pacing: Pacing,
     pub kinds: Vec<Kind>,
+    pub terrain: Vec<u32>,
 }
 
 /// A connection's handle to a run's task.
@@ -272,26 +273,20 @@ impl RunHandle {
     }
 }
 
-/// Create a run from a catalog entry, register it, and start its task. Returns the new run's
-/// ID, its handle, and the creator's session, whose pushed messages go to `outbox`.
+/// Create a run from a catalog entry's environment, register it, and start its task. Returns
+/// the new run's ID, its handle, and the creator's session, whose pushed messages go to
+/// `outbox`.
 pub fn create(
     catalog_entry: CatalogEntryId,
-    entry: CatalogEntry,
+    environment: Environment,
     registry: &Registry,
     config: ServerConfig,
     outbox: Outbox,
 ) -> (RunId, RunHandle, SessionInfo) {
     let id = RunId::new(random_id()).expect("random IDs are non-empty");
     let seed = rand::random();
-    let kinds = wire_kinds(&entry.kinds);
-    let sim = Simulation::new(SimConfig {
-        width: entry.width,
-        height: entry.height,
-        seed,
-        kinds: entry.kinds,
-        agent_kind: entry.agent_kind,
-    })
-    .expect("catalog entries have valid configurations");
+    let kinds = wire_kinds(environment.kinds());
+    let sim = Simulation::new(SimConfig { environment, seed });
     // The run outlives the connection that created it, so its span has no parent.
     let span = info_span!(parent: None, "run", %id);
     info!(parent: &span, %catalog_entry, seed, "run created");
@@ -429,6 +424,12 @@ impl Run {
                     view: self.view(),
                     pacing: self.pacer.state_for(&session),
                     kinds: self.kinds.clone(),
+                    terrain: self
+                        .sim
+                        .terrain()
+                        .iter()
+                        .map(|&index| u32::try_from(index).expect("kind indices fit in u32"))
+                        .collect(),
                 });
             }
             Command::ClaimPacing { session, reply } => {

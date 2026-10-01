@@ -4,25 +4,39 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use agora_env::{KindId, builtin};
+use agora_env::{Environment, KindId, Layout, builtin};
 use agora_sim::{
-    AdvanceError, AgentId, AgentLimitError, ConfigError, Direction, GridPos, Move, Placement,
-    RemoveError, SimConfig, Simulation, SpawnError, StartError, StateId, Status, Submission,
-    SubmitError, ViewState,
+    AdvanceError, AgentId, AgentLimitError, Direction, GridPos, Move, Placement, RemoveError,
+    SimConfig, Simulation, SpawnError, StartError, StateId, Status, Submission, SubmitError,
+    ViewState,
 };
 
-fn config(width: u32, height: u32, seed: u64) -> SimConfig {
-    SimConfig {
-        width,
-        height,
-        seed,
-        kinds: Arc::new(builtin::registry()),
-        agent_kind: builtin::agent_kind(),
-    }
+/// A simulation on a layout drawn as rows, north first: `#` is a wall, anything else floor.
+fn sim_on(rows: &[&str], seed: u64) -> Simulation {
+    let kind = |id: &str| KindId::new(id).unwrap();
+    let width = rows[0].len() as u32;
+    let cells = rows
+        .iter()
+        .rev()
+        .flat_map(|row| row.chars())
+        .map(|c| {
+            kind(if c == '#' {
+                builtin::WALL
+            } else {
+                builtin::FLOOR
+            })
+        })
+        .collect();
+    let layout = Layout::new(width, rows.len() as u32, cells).unwrap();
+    let environment =
+        Environment::new(Arc::new(builtin::registry()), layout, builtin::agent_kind()).unwrap();
+    Simulation::new(SimConfig { environment, seed })
 }
 
+/// A simulation on an open floor.
 fn sim(width: u32, height: u32, seed: u64) -> Simulation {
-    Simulation::new(config(width, height, seed)).expect("valid config")
+    let row = ".".repeat(width as usize);
+    sim_on(&vec![row.as_str(); height as usize], seed)
 }
 
 fn spawn_at(sim: &mut Simulation, x: u32, y: u32) -> AgentId {
@@ -67,32 +81,25 @@ fn r01_new_simulation_is_in_setup_at_state_zero() {
 }
 
 #[test]
-fn r01_zero_dimensions_are_rejected() {
-    for (width, height) in [(0, 10), (10, 0), (0, 0)] {
-        let result = Simulation::new(config(width, height, 0));
-        assert!(matches!(result, Err(ConfigError::EmptyGrid { .. })));
-    }
+fn r01_r20_grid_and_terrain_come_from_the_layout() {
+    // Built-in order: floor is kind 0 and wall is kind 1.
+    let sim = sim_on(&["#..", "..#"], 0);
+    let view = sim.view();
+    assert_eq!((view.width, view.height), (3, 2));
+    // Row-major from the south-west corner: the southern row, then the northern one.
+    assert_eq!(sim.terrain(), [0, 0, 1, 1, 0, 0]);
+    let wall = sim.terrain()[2];
+    assert_eq!(
+        sim.kinds().iter().nth(wall).unwrap().id.as_str(),
+        builtin::WALL
+    );
 }
 
 #[test]
-fn r01_agent_kind_must_be_a_registered_creature() {
-    let kind = |id: &str| KindId::new(id).unwrap();
-    let with_kind = |agent_kind| {
-        Simulation::new(SimConfig {
-            agent_kind,
-            ..config(10, 10, 0)
-        })
-    };
-    assert_eq!(
-        with_kind(kind("dragon")).err(),
-        Some(ConfigError::UnknownAgentKind(kind("dragon")))
-    );
-    for not_creature in [builtin::FLOOR, builtin::BERRY] {
-        assert_eq!(
-            with_kind(kind(not_creature)).err(),
-            Some(ConfigError::AgentKindNotCreature(kind(not_creature)))
-        );
-    }
+fn r01_agents_get_the_environment_agent_kind() {
+    let mut sim = sim(3, 3, 0);
+    spawn_at(&mut sim, 0, 0);
+    assert_eq!(sim.view().agents[0].kind, builtin::agent_kind());
 }
 
 #[test]
@@ -142,6 +149,18 @@ fn r03_out_of_bounds_and_occupied_cells_are_rejected() {
 }
 
 #[test]
+fn r03_cells_whose_terrain_blocks_movement_are_rejected() {
+    let mut sim = sim_on(&[".#", ".."], 0);
+    let wall = GridPos::new(1, 1);
+    assert_eq!(
+        sim.spawn(Placement::Cell(wall)),
+        Err(SpawnError::Blocked(wall))
+    );
+    assert_eq!(sim.agent_count(), 0);
+    assert_eq!(spawn_at(&mut sim, 0, 1), AgentId(1));
+}
+
+#[test]
 fn r04_random_spawns_fill_every_free_cell_then_fail() {
     let mut sim = sim(3, 3, 7);
     spawn_at(&mut sim, 1, 1);
@@ -170,6 +189,22 @@ fn r04_random_spawn_picks_cover_the_free_cells() {
         .into_iter()
         .collect();
     assert_eq!(seen, expected);
+}
+
+#[test]
+fn r04_random_spawns_skip_blocking_terrain() {
+    // Two floor cells among walls: two random spawns fill them, and a third finds no cell.
+    for seed in 0..20 {
+        let mut sim = sim_on(&["#.#", "##.", "###"], seed);
+        let a = sim.spawn(Placement::Random).unwrap();
+        let b = sim.spawn(Placement::Random).unwrap();
+        let cells: BTreeSet<_> = [position(&sim, a), position(&sim, b)].into_iter().collect();
+        let floors: BTreeSet<_> = [GridPos::new(1, 2), GridPos::new(2, 1)]
+            .into_iter()
+            .collect();
+        assert_eq!(cells, floors);
+        assert_eq!(sim.spawn(Placement::Random), Err(SpawnError::NoFreeCell));
+    }
 }
 
 #[test]
@@ -407,6 +442,21 @@ fn r13_moves_off_the_grid_fail_and_consume_the_turn() {
         assert_eq!(position(&sim, agent), start, "{direction:?}");
         assert_eq!(observations.state, StateId(1));
     }
+}
+
+#[test]
+fn r13_moves_into_blocking_terrain_fail_and_consume_the_turn() {
+    // A wall to the east of (0, 0); the cell to the north is floor.
+    let mut sim = sim_on(&["..", ".#"], 0);
+    let agent = spawn_at(&mut sim, 0, 0);
+    sim.start().unwrap();
+    submit(&mut sim, agent, Move::step(Direction::East)).unwrap();
+    let observations = sim.advance().unwrap();
+    assert_eq!(position(&sim, agent), GridPos::new(0, 0));
+    assert_eq!(observations.state, StateId(1));
+    submit(&mut sim, agent, Move::step(Direction::North)).unwrap();
+    sim.advance().unwrap();
+    assert_eq!(position(&sim, agent), GridPos::new(0, 1));
 }
 
 #[test]
