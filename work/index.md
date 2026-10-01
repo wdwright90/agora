@@ -4,7 +4,7 @@ Substantial tasks use stable directories named `AGORA-NNN-short-name`. Allocate 
 
 ## Active work
 
-- [AGORA-005 — Train and watch (M2)](AGORA-005-train-and-watch/brief.md): chunks 1 to 3 merged as #17, #18, and #19; chunk 4 (metabolism and food), split into four PRs, has started with step stages.
+- [AGORA-005 — Train and watch (M2)](AGORA-005-train-and-watch/brief.md): chunks 1 to 3 merged as #17, #18, and #19; chunk 4 (metabolism and food), split into four PRs, has started with step stages, in review as #20.
 
 ## Completed work
 

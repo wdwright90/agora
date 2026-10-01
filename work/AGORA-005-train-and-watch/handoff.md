@@ -1,10 +1,10 @@
 # Handoff
 
-Checkpoint: 2026-09-30. Chunks 1 to 3 are merged (#17, #18, #19). Chunk 4 is split into four PRs ([plan](plan.md), decisions in [context](context.md#chunk-4-decisions)); the first, 4.1 step stages, is on branch `feature/sim-schedule`.
+Checkpoint: 2026-09-30. Chunks 1 to 3 are merged (#17, #18, #19). Chunk 4 is split into four PRs ([plan](plan.md), decisions in [context](context.md#chunk-4-decisions)); the first, 4.1 step stages, is open as #20 on branch `feature/sim-schedule`.
 
 ## Resume here
 
-Open the 4.1 PR if it is not open yet, and check its review comments, agreeing any changes before making them. Once it merges, agree the details of 4.2 (modular definitions): file layout under `agora-env/environments/` (`layouts/`, `ecologies/`, and environment files), the environment file's fields, whether an environment with no ecology is allowed (proposed: yes), and how the server and SPEC-001-R01 change when the agent kind leaves the definition.
+Check #20's review comments with `gh pr view 20 --comments` and `gh api repos/wdwright90/agora/pulls/20/comments`, and agree any changes before making them. Until #20 merges, this handoff is newer on `feature/sim-schedule` than on `develop`. Once it merges, agree the details of 4.2 (modular definitions): file layout under `agora-env/environments/` (`layouts/`, `ecologies/`, and environment files), the environment file's fields, whether an environment with no ecology is allowed (proposed: yes), and how the server and SPEC-001-R01 change when the agent kind leaves the definition.
 
 ## Chunk 4.1: step stages
 
