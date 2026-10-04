@@ -91,6 +91,6 @@ Tests are in `rust/agora-env/tests/environment_definitions.rs`. Each test name s
 
 ## Open questions
 
-- How a catalog entry combines a layout with ecology rules, so the same layout can appear with and without food, is settled with ecology rules (AGORA-005 chunk 4). A definition may then refer to a layout rather than drawing its own.
+- Agreed on 2026-09-30, to be specified with AGORA-005 chunk 4: layouts and ecologies become separate files, and an environment file names the layout and optional ecology it combines; the agent kind leaves the definition ([CDD-001](../cdd.md#second-milestone-design)).
 - Whether a map can also place items, for example with a second map or a list of positions, waits until an environment needs placed items.
 - How definitions declare their own kinds, and how those combine with the built-in kinds, waits until an environment needs a new kind.

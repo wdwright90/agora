@@ -94,6 +94,7 @@ Server responsibilities are out of scope: connections, authority, pacing, deadli
   - No per-action outcome is returned.
 - **SPEC-001-R14:** At most one agent occupies any cell at all times.
 - **SPEC-001-R15:** After all moves execute, the state ID goes from N to N+1 and the accepted actions are cleared. Advancing returns an empty observation for every agent, keyed by agent ID and labeled N+1. Collection then targets N+1.
+- **SPEC-001-R21:** A step runs in the stages of CDD-001's [stage table](../cdd.md#step-stages), in that order, and each stage finishes before the next begins: moves run in the Actions stage, the state ID changes in the Commit stage, and observations are generated in Perception, which also produces Start's observations. Building the simulation fails if two of its systems have conflicting access to the same data without a declared order. A step runs on a single thread.
 
 ### Viewer state
 
@@ -121,7 +122,7 @@ The Rust API is `agora_sim::Simulation`, created from a `SimConfig` holding an `
 
 ## Acceptance criteria and verification
 
-Tests are in `rust/agora-sim/tests/lifecycle_and_movement.rs`, except R19's, which inspects the world from a unit test in `rust/agora-sim/src/simulation.rs`. Each test name starts with the requirement ID it checks.
+Tests are in `rust/agora-sim/tests/lifecycle_and_movement.rs`, except R19's, which inspects the world from a unit test in `rust/agora-sim/src/simulation.rs`, and R21's, which are unit tests in `rust/agora-sim/src/schedule.rs`. Each test name starts with the requirement ID it checks.
 
 | Requirement | Check and expected outcome | Test |
 | --- | --- | --- |
@@ -141,6 +142,7 @@ Tests are in `rust/agora-sim/tests/lifecycle_and_movement.rs`, except R19's, whi
 | R16 | View contents, including each agent's kind, in setup and after steps. | `r16_*` |
 | R17 | Identical seeds and inputs give identical histories; different seeds can differ. | `r17_*` |
 | R19 | Every component on an agent entity is registered for reflection. | `r19_*` (unit test) |
+| R21 | The stage order in code matches the CDD's table; the step schedule runs stages in that order, and the order holds across stages with no systems; unordered conflicting systems fail the build and ordering them fixes it. Moves, the state change, and observations are covered by R12 to R15. | `r21_*` (unit tests) |
 | R18 | Removal frees the cell without changing the state or reusing the ID; unknown agents fail; a removed agent's action is discarded; removing the only missing agent makes the run ready; removing every agent leaves it started-empty. | `r18_*` |
 
 ## Open questions
