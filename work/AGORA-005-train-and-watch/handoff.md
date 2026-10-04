@@ -1,10 +1,10 @@
 # Handoff
 
-Checkpoint: 2026-10-03. Chunks 1 to 3 and 4.1 are merged (#17 to #20). Chunk 4.2, modular definitions, is implemented on branch `feature/modular-definitions`, not yet committed or opened as a PR.
+Checkpoint: 2026-10-03. Chunks 1 to 3 and 4.1 are merged (#17 to #20). Chunk 4.2, modular definitions, is open as #21 on branch `feature/modular-definitions`.
 
 ## Resume here
 
-Commit 4.2 and open its PR against `develop` once the maintainer approves. After it merges, agree the details of 4.3 (metabolism): the energy component and its range, the exertion component, the default metabolism's numbers, the Metabolism and Removal stage systems, and the `agent_removed {reason}` push.
+Check #21's review comments with `gh pr view 21 --comments` and `gh api repos/wdwright90/agora/pulls/21/comments`, and agree any changes before making them. Until #21 merges, this handoff is newer on `feature/modular-definitions` than on `develop`. Once it merges, agree the details of 4.3 (metabolism): the energy component and its range, the exertion component, the default metabolism's numbers, the Metabolism and Removal stage systems, and the `agent_removed {reason}` push.
 
 ## Chunk 4.2: modular definitions
 
