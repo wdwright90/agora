@@ -28,7 +28,7 @@ const SHUFFLE_STREAM: u64 = 2;
 /// Configuration for creating a simulation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SimConfig {
-    /// The run's kinds, terrain layout, and agent kind (SPEC-007).
+    /// The run's kinds and terrain layout (SPEC-007).
     pub environment: Environment,
     /// Run seed from which all of the run's random streams are derived.
     pub seed: u64,
@@ -51,7 +51,8 @@ struct Position(GridPos);
 #[reflect(Component)]
 struct Kind(KindId);
 
-/// The run's kind registry and the kind given to spawned agents.
+/// The run's kind registry and the kind given to spawned agents: the built-in agent kind
+/// until spawning names a kind.
 #[derive(Resource)]
 struct Kinds {
     registry: Arc<KindRegistry>,
@@ -179,7 +180,7 @@ impl Simulation {
         });
         world.insert_resource(Kinds {
             registry: Arc::clone(kinds),
-            agent: environment.agent_kind().clone(),
+            agent: agora_env::builtin::agent_kind(),
         });
         world.insert_resource(Lifecycle {
             phase: Phase::Setup,
@@ -526,9 +527,10 @@ mod tests {
     fn r19_agent_components_are_reflectable() {
         let environment = agora_env::Environment::new(
             Arc::new(agora_env::builtin::registry()),
-            agora_env::Layout::filled(3, 3, KindId::new(agora_env::builtin::FLOOR).unwrap())
-                .unwrap(),
-            agora_env::builtin::agent_kind(),
+            Arc::new(
+                agora_env::Layout::filled(3, 3, KindId::new(agora_env::builtin::FLOOR).unwrap())
+                    .unwrap(),
+            ),
         )
         .unwrap();
         let mut sim = Simulation::new(SimConfig {

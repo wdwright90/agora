@@ -27,7 +27,7 @@ The `agora-server` package (`rust/agora-server`) implements this component as a 
 - **Request log:** tracks a session's highest admitted request ID and its most recent results, and decides whether a request is new, a retry to replay, or a rejected ID ([SPEC-002-R07](../../contracts/client-protocol.md#requests-and-sessions)).
 - **Run task:** one per run. It owns the run's `Simulation`, its sessions (creator flag, owned agents, outbox and view slot while connected, and expiry deadline), the run's release deadline, and the time of its last step for the step interval. It handles commands from connection tasks one at a time through a channel, which serializes every call into the simulation as [SPEC-001](../simulation/specs/lifecycle-and-movement.md) requires. Each run has its own task, so runs never share an action barrier.
 - **Registry:** the table of live runs by ID, shared by all connections. A run task removes itself when the run is released.
-- **Catalog:** the bundled environment entries, loaded once from `agora-env`'s bundled definitions with the built-in kinds: `empty-grid-10x10` and `divided-10x10`.
+- **Catalog:** the bundled environment entries, loaded once from `agora-env`'s bundled environments with the built-in kinds: `empty-grid-10x10` and `divided-10x10`.
 
 ## Interfaces and dependencies
 

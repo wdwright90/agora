@@ -47,7 +47,7 @@ Server responsibilities are out of scope: connections, authority, pacing, deadli
 
 ### Creation and coordinates
 
-- **SPEC-001-R01:** Creating a simulation takes an environment ([SPEC-007](environment-definitions.md)) and a run seed. It cannot fail, because an environment is already checked ([SPEC-007-R02](environment-definitions.md#layouts-and-environments)). The grid has the layout's width and height, and each cell has the layout's terrain kind. The kind registry is the environment's ([SPEC-006](kinds-and-appearance.md)), and every spawned agent has the environment's agent kind. The new simulation is in setup at state 0 with no agents.
+- **SPEC-001-R01:** Creating a simulation takes an environment ([SPEC-007](environment-definitions.md)) and a run seed. It cannot fail, because an environment is already checked ([SPEC-007-R02](environment-definitions.md#layouts-and-environments)). The grid has the layout's width and height, and each cell has the layout's terrain kind. The kind registry is the environment's ([SPEC-006](kinds-and-appearance.md)), and every spawned agent has the built-in `agent` kind ([SPEC-006-R04](kinds-and-appearance.md#built-in-kinds)), which the environment's registry declares. The new simulation is in setup at state 0 with no agents.
 - **SPEC-001-R02:** Cells use unsigned `(x, y)` coordinates. `(0, 0)` is the south-west corner; `x` grows east and `y` grows north. North is `y + 1`, east is `x + 1`, south is `y − 1`, and west is `x − 1`. A cell is in bounds when `x < width` and `y < height`.
 
 ### Spawning
@@ -126,7 +126,7 @@ Tests are in `rust/agora-sim/tests/lifecycle_and_movement.rs`, except R19's, whi
 
 | Requirement | Check and expected outcome | Test |
 | --- | --- | --- |
-| R01, R20 | New simulation is in setup at state 0 with no agents; the grid's size and terrain come from the layout, in the documented order; agents get the environment's agent kind. | `r01_*` |
+| R01, R20 | New simulation is in setup at state 0 with no agents; the grid's size and terrain come from the layout, in the documented order; agents get the built-in `agent` kind. | `r01_*` |
 | R02 | Each direction moves along the documented axis. | `r02_*` |
 | R03 | Explicit spawn succeeds; out-of-bounds, blocked, and occupied cells fail without changes. | `r03_*` |
 | R04 | Random spawns fill every free cell and then report no free cell; picks cover the free cells; cells with blocking terrain are never picked. | `r04_*` |

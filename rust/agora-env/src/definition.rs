@@ -1,4 +1,4 @@
-//! Environment definitions in TOML (SPEC-006).
+//! Layout and environment files in TOML (SPEC-007).
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -10,11 +10,11 @@ use crate::environment::{Environment, EnvironmentError};
 use crate::kinds::{EmptyKindId, KindId, KindRegistry, Look};
 use crate::layout::{Layout, LayoutError};
 
-/// Why a definition could not be loaded.
+/// Why a layout or environment file could not be loaded.
 #[derive(Debug, Clone, Error)]
 pub enum DefinitionError {
-    /// Not TOML, or not the definition's shape: a missing, unknown, or mistyped field.
-    #[error("invalid definition: {0}")]
+    /// Not TOML, or not the file's shape: a missing, unknown, or mistyped field.
+    #[error("invalid file: {0}")]
     Toml(#[from] toml::de::Error),
     #[error(transparent)]
     EmptyKindId(#[from] EmptyKindId),
@@ -40,34 +40,49 @@ pub enum DefinitionError {
     },
     #[error(transparent)]
     Layout(#[from] LayoutError),
+    #[error("layout {0:?} does not exist")]
+    UnknownLayout(String),
     #[error(transparent)]
     Environment(#[from] EnvironmentError),
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Definition {
-    agent_kind: String,
-    layout: LayoutDefinition,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct LayoutDefinition {
+struct LayoutFile {
     map: String,
     legend: BTreeMap<String, String>,
 }
 
-impl Environment {
-    /// Load an environment from a TOML definition whose kinds come from `kinds`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EnvironmentFile {
+    layout: String,
+}
+
+impl Layout {
+    /// Load a layout from a TOML layout file whose legend names terrain kinds in `kinds`.
     ///
     /// The map's first line is the northern row, and each character is one cell, west to east.
-    pub fn from_toml(source: &str, kinds: Arc<KindRegistry>) -> Result<Self, DefinitionError> {
-        let definition: Definition = toml::from_str(source)?;
-        let legend = legend(definition.layout.legend, &kinds)?;
-        let layout = layout(&definition.layout.map, &legend)?;
-        let agent_kind = KindId::new(definition.agent_kind)?;
-        Ok(Environment::new(kinds, layout, agent_kind)?)
+    pub fn from_toml(source: &str, kinds: &KindRegistry) -> Result<Self, DefinitionError> {
+        let file: LayoutFile = toml::from_str(source)?;
+        let legend = legend(file.legend, kinds)?;
+        layout(&file.map, &legend)
+    }
+}
+
+impl Environment {
+    /// Load an environment from a TOML environment file. Its layout is looked up by ID in
+    /// `layouts`, which were loaded with the same `kinds`.
+    pub fn from_toml(
+        source: &str,
+        kinds: Arc<KindRegistry>,
+        layouts: &BTreeMap<String, Arc<Layout>>,
+    ) -> Result<Self, DefinitionError> {
+        let file: EnvironmentFile = toml::from_str(source)?;
+        let layout = layouts
+            .get(&file.layout)
+            .ok_or(DefinitionError::UnknownLayout(file.layout))?;
+        Ok(Environment::new(kinds, Arc::clone(layout))?)
     }
 }
 
