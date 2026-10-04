@@ -5,9 +5,9 @@
 //! things look, read by the simulation and sent to viewers. [`builtin`] holds the kinds the
 //! bundled environments use.
 //!
-//! An [`Environment`] is what a run is built from: its kinds, a [`Layout`] giving every cell's
-//! terrain, and the kind given to agents. Environments load from TOML definitions, and
-//! [`bundled`] holds the definitions compiled into the program. Behavior is specified by
+//! An [`Environment`] is what a run is built from: its kinds and a [`Layout`] giving every
+//! cell's terrain. Layouts and environments load from separate TOML files, an environment file
+//! naming its layout by ID, and [`bundled`] holds the files compiled into the program. Behavior is specified by
 //! SPEC-006 (`docs/components/simulation/specs/kinds-and-appearance.md`) and SPEC-007
 //! (`docs/components/simulation/specs/environment-definitions.md`).
 //!

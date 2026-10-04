@@ -1,39 +1,38 @@
 # Handoff
 
-Checkpoint: 2026-09-30. Chunks 1 to 3 are merged (#17, #18, #19). Chunk 4 is split into four PRs ([plan](plan.md), decisions in [context](context.md#chunk-4-decisions)); the first, 4.1 step stages, is open as #20 on branch `feature/sim-schedule`.
+Checkpoint: 2026-10-03. Chunks 1 to 3 and 4.1 are merged (#17 to #20). Chunk 4.2, modular definitions, is implemented on branch `feature/modular-definitions`, not yet committed or opened as a PR.
 
 ## Resume here
 
-Check #20's review comments with `gh pr view 20 --comments` and `gh api repos/wdwright90/agora/pulls/20/comments`, and agree any changes before making them. Until #20 merges, this handoff is newer on `feature/sim-schedule` than on `develop`. Once it merges, agree the details of 4.2 (modular definitions): file layout under `agora-env/environments/` (`layouts/`, `ecologies/`, and environment files), the environment file's fields, whether an environment with no ecology is allowed (proposed: yes), and how the server and SPEC-001-R01 change when the agent kind leaves the definition.
+Commit 4.2 and open its PR against `develop` once the maintainer approves. After it merges, agree the details of 4.3 (metabolism): the energy component and its range, the exertion component, the default metabolism's numbers, the Metabolism and Removal stage systems, and the `agent_removed {reason}` push.
 
-## Chunk 4.1: step stages
+## Chunk 4.2: modular definitions
 
-Agreed scope (2026-09-30): a step runs as a fixed sequence of stages, each system in one stage, with the order set once and checked against the CDD; conflicting systems within a stage must be ordered; one thread per run for now. No behavior change.
+Agreed scope (2026-10-03, [context](context.md#chunk-4-decisions)): layout files in `environments/layouts/`, environment files naming their layout by ID, two-step loading with an error for an unknown layout ID, no ecology field until 4.4, and the agent kind removed from definitions.
 
-Choices made in 4.1, open to review:
+Choices made in 4.2, open to review:
 
-- **"Stage", not "phase",** because CDD-001 already uses *phases* for setup, collection, and execution.
-- **All agreed stages are declared now,** including those with no systems yet (Interactions, Metabolism, Removal, Ecology, Membership), so the full order is visible. `Stage::ALL` is the single list that sets the order.
-- **Commit is a stage** that increments the state ID, so the step's whole sequence is in the schedule.
-- **Perception is a separate schedule,** because it also runs without a step (at Start, and later empty-run admission and recovery). Its system writes a `Perceived` resource that the operation takes.
-- **Schedules are built in `Simulation::new`,** so an ambiguous pair of systems fails at creation, not on the first step.
-- **ADR-003 is marked accepted,** based on the maintainer's agreement in discussion; review of the PR confirms it.
+- **The registry must declare `agent` as a creature.** `Environment::new` checks it in place of the old supplied agent kind, so a built environment can still be trusted ([SPEC-007-R02](../../docs/components/simulation/specs/environment-definitions.md#layouts-and-environments)).
+- **Environments share their layout** as `Arc<Layout>`, so one loaded layout serves every environment that names it.
+- **`bundled::environments(kinds)`** loads every bundled file and names the one that fails (`BundledError`); the server's catalog calls it instead of reading the files itself.
+- **Requirement IDs stay stable:** R03 is now the layout file format, R04 and R05 are unchanged, and the environment file format is the new R07.
+- An empty layout ID is rejected as an unknown layout, not with a separate error.
 
 Contents:
 
-- `agora-sim`: `schedule.rs` (`Stage`, the `Step` and `Perceive` labels, `new_schedule` with a single-threaded executor and ambiguity detection as an error, `step_schedule`); `advance` runs the step schedule; moves, the state increment, and observations are now systems.
-- Docs: ADR-003 (new); CDD-001 step stages table, metabolism and exertion, direction for actions, modular definitions (agreed, not built), determinism, and open questions; SPEC-001-R21 (new); the SADD's environment definition paragraph (separate layouts and ecologies; agent settings belong to the agent); SPEC-007's open question; the decisions index and the documentation index.
-- Records: context ([chunk 4 decisions](context.md#chunk-4-decisions)), plan, work index, and this handoff.
+- `agora-env`: `Layout::from_toml`, `Environment::from_toml(source, kinds, &layouts)`, `Environment::new(kinds, layout)` without the agent kind, `bundled::{LAYOUTS, ENVIRONMENTS, environments, BundledError}`, `DefinitionError::UnknownLayout`, and `EnvironmentError::MissingAgentKind`; the layout files moved to `environments/layouts/`, and environment files reduced to `layout = "<id>"`. Doc comments now cite SPEC-007 instead of SPEC-006.
+- `agora-sim` spawns agents with `builtin::agent_kind()`; `agora-server`'s catalog uses `bundled::environments`.
+- Docs: SPEC-007 (R02, R03, R06 rewritten, R07 new, terminology, open questions); SPEC-001-R01; SPEC-003-R01 wording; CDD-001's environment definitions; the server CDD's catalog line; the SADD package table; `rust/README.md`.
+- Records: context (4.2 details), plan, work index, and this handoff.
 
 Verification, in `rust/`:
 
 - `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo doc --no-deps --workspace` with `RUSTDOCFLAGS=-D warnings`: all passed.
-- `cargo test --workspace`: 168 passed (43 in agora-sim, including three new R21 unit tests), one full run.
-- Relative links and anchors in all Markdown files resolve (a local script).
-- Not done: a manual run with the viewer and demo clients. Behavior is unchanged, and the existing SPEC-001 tests, including R17's reproducibility test, pass.
+- `cargo test --workspace`: 174 passed, one full run.
+- Not done: a manual run with the viewer and demo clients. The catalog's environments are unchanged, and the server's catalog and run tests pass.
 
 ## State
 
 - M1 is complete and in `main` ([AGORA-004](../AGORA-004-first-milestone/handoff.md) has its follow-ups, several of which are now scheduled in the roadmap).
-- Chunk 3's choices are recorded in #19 and in SPEC-007; chunk 2's in #18 and SPEC-006; chunk 1's in #17 and SPEC-003.
+- Chunk 4.1's choices are recorded in #20 and ADR-003; chunk 3's in #19 and SPEC-007; chunk 2's in #18 and SPEC-006; chunk 1's in #17 and SPEC-003.
 - Design decisions are recorded in the SADD's [second milestone](../../docs/architecture/sadd.md#second-milestone-train-and-watch) section and CDD-001, with the reasoning and wire sketches in [context.md](context.md).
