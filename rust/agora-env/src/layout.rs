@@ -1,4 +1,4 @@
-//! A grid of terrain kinds (SPEC-006).
+//! A grid of terrain kinds (SPEC-007).
 
 use thiserror::Error;
 

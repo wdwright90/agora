@@ -124,7 +124,13 @@ Agreed with the maintainer on 2026-09-30, while scoping chunk 4.
 
 - Layouts and ecologies are separate files, each with its own IDs. An environment file names the layout and the optional ecology it combines. The maintainer wants this flexibility early, and expects more axes of control later, so the format stays modular.
 - An **ecology sets the properties of non-agent things**, such as a berry's nutrition, as well as its rules, so food can be tuned across training environments easily. A consequence: the same kind can be worth different amounts in different environments, and two differently nourishing foods in one environment need two kinds.
-- **The agent kind leaves the environment**, which the SADD's extension boundaries already required: environment definitions do not declare agent types. Every agent gets the built-in `agent` kind until species arrive (M3).
+- **The agent kind leaves the environment**, which the SADD's extension boundaries already required: environment definitions do not declare agent types. Every agent gets the built-in `agent` kind until species arrive (M3); eventually spawning will say which kind an agent gets.
+
+Details agreed on 2026-10-03, while scoping 4.2:
+
+- **Files.** Layout files are in `agora-env/environments/layouts/`, and environment files stay in `agora-env/environments/`, named after the catalog entry. IDs are file names, so a layout and an environment may share one.
+- **Two-step loading.** Layouts load first, each checked once whether or not an environment uses it; an environment file then names its layout by ID, and an unknown ID (a missing referenced file) is an error naming it. Each error belongs to one file.
+- **Ecology files wait for 4.4**, when they first have properties and rules; an environment with no ecology is allowed. 4.2 adds no `ecology` field, so an environment file has only `layout`.
 
 **Metabolism and exertion:**
 

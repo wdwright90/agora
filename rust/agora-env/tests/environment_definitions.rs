@@ -1,11 +1,11 @@
 //! Tests for SPEC-007 (`docs/components/simulation/specs/environment-definitions.md`).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use agora_env::{
-    DefinitionError, Environment, EnvironmentError, KindId, KindRegistry, Layout, LayoutError,
-    builtin, bundled,
+    DefinitionError, Environment, EnvironmentError, Kind, KindId, KindRegistry, Layout,
+    LayoutError, Look, builtin, bundled,
 };
 
 fn id(id: &str) -> KindId {
@@ -16,15 +16,39 @@ fn kinds() -> Arc<KindRegistry> {
     Arc::new(builtin::registry())
 }
 
-/// A definition with the built-in agent kind and a floor-and-wall legend.
-fn definition(map: &str) -> String {
-    format!(
-        "agent_kind = \"agent\"\n\n[layout]\nmap = \"\"\"\n{map}\"\"\"\n\n[layout.legend]\n\".\" = \"floor\"\n\"#\" = \"wall\"\n"
-    )
+/// The built-in kinds, with the agent kind given `look`, or left out if `look` is `None`.
+fn kinds_with_agent(look: Option<Look>) -> Arc<KindRegistry> {
+    let mut kinds: Vec<Kind> = builtin::registry()
+        .iter()
+        .filter(|kind| kind.id != builtin::agent_kind())
+        .cloned()
+        .collect();
+    kinds.extend(look.map(|look| Kind {
+        id: builtin::agent_kind(),
+        look,
+    }));
+    Arc::new(KindRegistry::new(kinds).unwrap())
 }
 
-fn load(source: &str) -> Result<Environment, DefinitionError> {
-    Environment::from_toml(source, kinds())
+/// A layout file with a floor-and-wall legend.
+fn definition(map: &str) -> String {
+    format!("map = \"\"\"\n{map}\"\"\"\n\n[legend]\n\".\" = \"floor\"\n\"#\" = \"wall\"\n")
+}
+
+fn load(source: &str) -> Result<Layout, DefinitionError> {
+    Layout::from_toml(source, &kinds())
+}
+
+fn floor() -> Arc<Layout> {
+    Arc::new(Layout::filled(2, 2, id(builtin::FLOOR)).unwrap())
+}
+
+fn layouts() -> BTreeMap<String, Arc<Layout>> {
+    BTreeMap::from([("floor".to_owned(), floor())])
+}
+
+fn load_environment(source: &str) -> Result<Environment, DefinitionError> {
+    Environment::from_toml(source, kinds(), &layouts())
 }
 
 #[test]
@@ -63,62 +87,62 @@ fn r01_empty_and_mismatched_layouts_are_rejected() {
 }
 
 #[test]
-fn r02_environment_checks_layout_and_agent_kinds() {
-    let floor = || Layout::filled(2, 2, id(builtin::FLOOR)).unwrap();
-    let env = |layout, agent: &str| Environment::new(kinds(), layout, id(agent));
+fn r02_environment_checks_layout_kinds() {
+    let env = |layout: Layout| Environment::new(kinds(), Arc::new(layout));
 
-    let ok = env(floor(), builtin::AGENT).unwrap();
-    assert_eq!(ok.agent_kind(), &id(builtin::AGENT));
-    assert_eq!(ok.layout(), &floor());
+    let ok = Environment::new(kinds(), floor()).unwrap();
+    assert_eq!(ok.layout(), &*floor());
     assert_eq!(**ok.kinds(), builtin::registry());
 
     assert_eq!(
-        env(Layout::filled(2, 2, id("lava")).unwrap(), builtin::AGENT),
+        env(Layout::filled(2, 2, id("lava")).unwrap()),
         Err(EnvironmentError::UnknownTerrainKind(id("lava")))
     );
     assert_eq!(
-        env(
-            Layout::filled(2, 2, id(builtin::BERRY)).unwrap(),
-            builtin::AGENT
-        ),
+        env(Layout::filled(2, 2, id(builtin::BERRY)).unwrap()),
         Err(EnvironmentError::NotTerrain(id(builtin::BERRY)))
     );
-    assert_eq!(
-        env(floor(), "dragon"),
-        Err(EnvironmentError::UnknownAgentKind(id("dragon")))
-    );
-    for not_creature in [builtin::FLOOR, builtin::BERRY] {
-        assert_eq!(
-            env(floor(), not_creature),
-            Err(EnvironmentError::AgentKindNotCreature(id(not_creature)))
-        );
-    }
 }
 
 #[test]
-fn r03_r05_a_definition_loads_with_the_first_line_north() {
-    let env = load(&definition("#..\n..#\n")).unwrap();
-    let layout = env.layout();
+fn r02_the_registry_must_declare_the_agent_kind_as_a_creature() {
+    assert_eq!(
+        Environment::new(kinds_with_agent(None), floor()),
+        Err(EnvironmentError::MissingAgentKind(builtin::agent_kind()))
+    );
+    let berry = builtin::registry().get(&id(builtin::BERRY)).unwrap().look;
+    assert_eq!(
+        Environment::new(kinds_with_agent(Some(berry)), floor()),
+        Err(EnvironmentError::AgentKindNotCreature(builtin::agent_kind()))
+    );
+}
+
+#[test]
+fn r03_r05_a_layout_file_loads_with_the_first_line_north() {
+    let layout = load(&definition("#..\n..#\n")).unwrap();
     assert_eq!((layout.width(), layout.height()), (3, 2));
     // The first map line is the northern row, y = 1.
     assert_eq!(layout.get(0, 1), Some(&id(builtin::WALL)));
     assert_eq!(layout.get(2, 0), Some(&id(builtin::WALL)));
     assert_eq!(layout.get(0, 0), Some(&id(builtin::FLOOR)));
-    assert_eq!(env.agent_kind(), &id(builtin::AGENT));
 }
 
 #[test]
 fn r03_invalid_toml_and_wrong_fields_are_rejected() {
-    let unknown_field = definition("..\n").replace("[layout]\n", "[layout]\nwrap = true\n");
-    let unknown_top = format!("colour = \"blue\"\n{}", definition("..\n"));
-    let missing_agent = definition("..\n").replace("agent_kind = \"agent\"\n", "");
-    let mistyped = definition("..\n").replace("\"agent\"", "3");
+    let unknown_field = format!("colour = \"blue\"\n{}", definition("..\n"));
+    let missing_map = "[legend]\n\".\" = \"floor\"\n";
+    let missing_legend = "map = \"..\"\n";
+    let mistyped = definition("..\n").replace("\"wall\"", "3");
+    // The format before layouts and environments were separate files.
+    let combined =
+        "agent_kind = \"agent\"\n[layout]\nmap = \"..\"\n[layout.legend]\n\".\" = \"floor\"\n";
     for source in [
         "not toml at all [",
         &unknown_field,
-        &unknown_top,
-        &missing_agent,
+        missing_map,
+        missing_legend,
         &mistyped,
+        combined,
     ] {
         assert!(
             matches!(load(source), Err(DefinitionError::Toml(_))),
@@ -128,22 +152,17 @@ fn r03_invalid_toml_and_wrong_fields_are_rejected() {
 }
 
 #[test]
-fn r03_the_agent_kind_is_checked() {
-    let dragon = definition("..\n").replace("\"agent\"", "\"dragon\"");
-    assert!(matches!(
-        load(&dragon),
-        Err(DefinitionError::Environment(EnvironmentError::UnknownAgentKind(k))) if k == id("dragon")
-    ));
-    let empty = definition("..\n").replace("\"agent\"", "\"\"");
+fn r03_an_empty_kind_id_is_rejected() {
+    let empty = definition("..\n").replace("\"wall\"", "\"\"");
     assert!(matches!(load(&empty), Err(DefinitionError::EmptyKindId(_))));
 }
 
 #[test]
 fn r04_legend_keys_are_single_characters_of_any_script() {
-    let source = "agent_kind = \"agent\"\n[layout]\nmap = \"\"\"\n█·\n\"\"\"\n[layout.legend]\n\"█\" = \"wall\"\n\"·\" = \"floor\"\n";
-    let env = load(source).unwrap();
-    assert_eq!(env.layout().get(0, 0), Some(&id(builtin::WALL)));
-    assert_eq!(env.layout().get(1, 0), Some(&id(builtin::FLOOR)));
+    let source = "map = \"\"\"\n█·\n\"\"\"\n[legend]\n\"█\" = \"wall\"\n\"·\" = \"floor\"\n";
+    let layout = load(source).unwrap();
+    assert_eq!(layout.get(0, 0), Some(&id(builtin::WALL)));
+    assert_eq!(layout.get(1, 0), Some(&id(builtin::FLOOR)));
 
     for key in ["", "..", "ab"] {
         let bad = definition("..\n").replace("\"#\" = ", &format!("\"{key}\" = "));
@@ -207,57 +226,126 @@ fn r05_empty_ragged_and_unknown_maps_are_rejected() {
 }
 
 #[test]
-fn r06_bundled_definitions_load_with_the_built_in_kinds() {
-    let ids: Vec<&str> = bundled::DEFINITIONS.iter().map(|(id, _)| *id).collect();
-    assert_eq!(ids, ["empty-grid-10x10", "divided-10x10"]);
-    for (entry, source) in bundled::DEFINITIONS {
-        let env = Environment::from_toml(source, kinds())
-            .unwrap_or_else(|e| panic!("{entry} does not load: {e}"));
-        assert_eq!(env.agent_kind(), &builtin::agent_kind(), "{entry}");
-    }
+fn r06_bundled_files_load_with_the_built_in_kinds() {
+    let ids = |files: &[(&'static str, &str)]| files.iter().map(|(id, _)| *id).collect::<Vec<_>>();
+    assert_eq!(ids(bundled::LAYOUTS), ["empty-grid-10x10", "divided-10x10"]);
+    assert_eq!(
+        ids(bundled::ENVIRONMENTS),
+        ["empty-grid-10x10", "divided-10x10"]
+    );
+    let environments = bundled::environments(kinds()).unwrap();
+    let loaded: Vec<&str> = environments.iter().map(|(id, _)| *id).collect();
+    assert_eq!(loaded, ids(bundled::ENVIRONMENTS));
 }
 
 #[test]
-fn r06_every_file_in_the_environments_directory_is_bundled() {
+fn r06_every_file_in_the_bundled_directories_is_bundled() {
+    let entries = |dir: &str, files: bool| -> BTreeSet<String> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap())
+            .filter(|entry| entry.file_type().unwrap().is_file() == files)
+            .map(|entry| entry.file_name().into_string().unwrap())
+            .collect()
+    };
+    let named = |files: &[(&str, &str)]| -> BTreeSet<String> {
+        files.iter().map(|(id, _)| format!("{id}.toml")).collect()
+    };
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/environments");
-    let files: BTreeSet<String> = std::fs::read_dir(dir)
-        .unwrap()
-        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
-        .collect();
-    let bundled: BTreeSet<String> = bundled::DEFINITIONS
-        .iter()
-        .map(|(id, _)| format!("{id}.toml"))
-        .collect();
-    assert_eq!(files, bundled);
+    let layouts = format!("{dir}/layouts");
+    assert_eq!(entries(dir, true), named(bundled::ENVIRONMENTS));
+    assert_eq!(entries(&layouts, true), named(bundled::LAYOUTS));
+    assert_eq!(entries(dir, false), BTreeSet::from(["layouts".to_owned()]));
+    assert!(entries(&layouts, false).is_empty());
 }
 
 #[test]
-fn r06_bundled_layouts() {
-    let load = |entry: &str| {
-        let (_, source) = bundled::DEFINITIONS
-            .iter()
-            .find(|(id, _)| *id == entry)
-            .unwrap();
-        Environment::from_toml(source, kinds()).unwrap()
+fn r06_bundled_environments_use_their_layouts() {
+    let environments = bundled::environments(kinds()).unwrap();
+    let layout = |entry: &str| {
+        let (_, environment) = environments.iter().find(|(id, _)| *id == entry).unwrap();
+        environment.layout().clone()
     };
     let wall = id(builtin::WALL);
 
-    let empty = load("empty-grid-10x10");
     assert_eq!(
-        empty.layout(),
-        &Layout::filled(10, 10, id(builtin::FLOOR)).unwrap()
+        layout("empty-grid-10x10"),
+        Layout::filled(10, 10, id(builtin::FLOOR)).unwrap()
     );
 
-    let divided = load("divided-10x10");
-    let layout = divided.layout();
-    assert_eq!((layout.width(), layout.height()), (10, 10));
+    let divided = layout("divided-10x10");
+    assert_eq!((divided.width(), divided.height()), (10, 10));
     let walls: BTreeSet<(u32, u32)> = (0..10)
         .flat_map(|y| (0..10).map(move |x| (x, y)))
-        .filter(|&(x, y)| layout.get(x, y) == Some(&wall))
+        .filter(|&(x, y)| divided.get(x, y) == Some(&wall))
         .collect();
     let expected: BTreeSet<(u32, u32)> = (0..10)
         .filter(|y| !(4..=5).contains(y))
         .map(|y| (5, y))
         .collect();
     assert_eq!(walls, expected);
+}
+
+#[test]
+fn r06_a_bundled_failure_names_the_file() {
+    // Without the agent kind, every layout loads but the first environment fails.
+    let error = bundled::environments(kinds_with_agent(None)).unwrap_err();
+    assert!(
+        matches!(
+            &error,
+            bundled::BundledError::Environment {
+                id: "empty-grid-10x10",
+                ..
+            }
+        ),
+        "{error}"
+    );
+    assert!(error.to_string().contains("empty-grid-10x10"), "{error}");
+}
+
+#[test]
+fn r07_an_environment_file_names_its_layout() {
+    let env = load_environment("layout = \"floor\"\n").unwrap();
+    assert_eq!(env.layout(), &*floor());
+    assert_eq!(**env.kinds(), builtin::registry());
+}
+
+#[test]
+fn r07_unknown_and_empty_layout_ids_are_rejected() {
+    for missing in ["walls", ""] {
+        let source = format!("layout = \"{missing}\"\n");
+        assert!(
+            matches!(
+                load_environment(&source),
+                Err(DefinitionError::UnknownLayout(l)) if l == missing
+            ),
+            "{missing:?}"
+        );
+    }
+}
+
+#[test]
+fn r07_invalid_toml_and_wrong_fields_are_rejected() {
+    for source in [
+        "not toml at all [",
+        "",
+        "layout = 3\n",
+        "layout = \"floor\"\nagent_kind = \"agent\"\n",
+        "layout = \"floor\"\necology = \"berries\"\n",
+    ] {
+        assert!(
+            matches!(load_environment(source), Err(DefinitionError::Toml(_))),
+            "{source:?}"
+        );
+    }
+}
+
+#[test]
+fn r07_the_loaded_environment_is_checked() {
+    let berries = Arc::new(Layout::filled(2, 2, id(builtin::BERRY)).unwrap());
+    let layouts = BTreeMap::from([("berries".to_owned(), berries)]);
+    assert!(matches!(
+        Environment::from_toml("layout = \"berries\"\n", kinds(), &layouts),
+        Err(DefinitionError::Environment(EnvironmentError::NotTerrain(k))) if k == id(builtin::BERRY)
+    ));
 }

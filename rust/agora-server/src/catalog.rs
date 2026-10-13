@@ -1,5 +1,5 @@
 //! The bundled environment catalog (SPEC-003-R01), built from `agora-env`'s bundled
-//! definitions.
+//! environment files.
 
 use std::sync::{Arc, LazyLock};
 
@@ -13,15 +13,7 @@ pub const DIVIDED_10X10: &str = "divided-10x10";
 
 /// Every bundled environment, loaded once with the built-in kinds.
 static CATALOG: LazyLock<Vec<(&str, Environment)>> = LazyLock::new(|| {
-    let kinds = Arc::new(builtin::registry());
-    bundled::DEFINITIONS
-        .iter()
-        .map(|&(id, source)| {
-            let environment = Environment::from_toml(source, Arc::clone(&kinds))
-                .unwrap_or_else(|error| panic!("bundled environment {id} is invalid: {error}"));
-            (id, environment)
-        })
-        .collect()
+    bundled::environments(Arc::new(builtin::registry())).unwrap_or_else(|error| panic!("{error}"))
 });
 
 /// Look up a catalog entry by ID.

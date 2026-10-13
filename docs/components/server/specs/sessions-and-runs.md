@@ -12,7 +12,7 @@ packages: [agora-server]
 
 This spec defines the [server's](../cdd.md) behavior that is not part of the wire contract. It covers:
 
-- the bundled catalog, built from the bundled environment definitions
+- the bundled catalog, built from the bundled environments
 - run and session identifiers
 - creator authority and agent ownership
 - Start eligibility
@@ -40,7 +40,7 @@ The SADD and CDD describe further behavior that is not yet covered here and is n
 
 ### Catalog and identifiers
 
-- **SPEC-003-R01:** The catalog has one entry for each bundled environment definition, with the definition's ID, loaded with the built-in kinds ([SPEC-007-R06](../../simulation/specs/environment-definitions.md#bundled-definitions)): `empty-grid-10x10`, an open 10 × 10 floor, and `divided-10x10`, a 10 × 10 floor divided by a wall with a gap. A run is created from its entry's environment. Each run's simulation seed comes from OS randomness and is written to the server log.
+- **SPEC-003-R01:** The catalog has one entry for each bundled environment, with the environment's ID, loaded with the built-in kinds ([SPEC-007-R06](../../simulation/specs/environment-definitions.md#bundled-definitions)): `empty-grid-10x10`, an open 10 × 10 floor, and `divided-10x10`, a 10 × 10 floor divided by a wall with a gap. A run is created from its entry's environment. Each run's simulation seed comes from OS randomness and is written to the server log.
 - **SPEC-003-R02:** Run IDs and session IDs are assigned by the server and are unique. Clients treat them as opaque strings. Each successful `join_run` creates a new session.
 
 ### Authority and ownership

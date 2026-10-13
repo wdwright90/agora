@@ -28,8 +28,7 @@ fn sim_on(rows: &[&str], seed: u64) -> Simulation {
         })
         .collect();
     let layout = Layout::new(width, rows.len() as u32, cells).unwrap();
-    let environment =
-        Environment::new(Arc::new(builtin::registry()), layout, builtin::agent_kind()).unwrap();
+    let environment = Environment::new(Arc::new(builtin::registry()), Arc::new(layout)).unwrap();
     Simulation::new(SimConfig { environment, seed })
 }
 
@@ -96,7 +95,7 @@ fn r01_r20_grid_and_terrain_come_from_the_layout() {
 }
 
 #[test]
-fn r01_agents_get_the_environment_agent_kind() {
+fn r01_agents_get_the_built_in_agent_kind() {
     let mut sim = sim(3, 3, 0);
     spawn_at(&mut sim, 0, 0);
     assert_eq!(sim.view().agents[0].kind, builtin::agent_kind());
