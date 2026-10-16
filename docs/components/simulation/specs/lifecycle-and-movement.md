@@ -13,7 +13,7 @@ packages: [agora-sim]
 This spec defines the observable behavior of the [simulation component](../cdd.md) that is currently implemented. It covers:
 
 - creating a bounded grid from an environment ([SPEC-007](environment-definitions.md)), with each cell's terrain
-- spawning agents during setup
+- spawning agents during setup, each with the capabilities of an agent definition ([SPEC-008](agent-definitions.md))
 - Start
 - action submission
 - readiness
@@ -22,6 +22,7 @@ This spec defines the observable behavior of the [simulation component](../cdd.m
 - immediate agent removal, used for session-expiry cleanup
 - agent kinds, from the run's kind registry ([SPEC-006](kinds-and-appearance.md))
 - terrain that blocks movement
+- metabolism: energy, the effort moves spend, decay, starvation and the removal of starved agents, and agents perceiving their energy
 - reflection of simulation components, for inspection
 
 It is extended feature by feature. Each change updates these requirements together with the implementation and its tests.
@@ -34,6 +35,7 @@ The CDD and [SADD](../../../architecture/sadd.md) define further behavior that i
 - clearing a pending action on reconnection
 - live edits, including changing terrain
 - sight, which will use terrain's `blocks_sight` flag
+- food and eating, in the Interactions stage, and ecology rules (AGORA-005 chunk 4.4)
 
 Server responsibilities are out of scope: connections, authority, pacing, deadlines, request correlation, and wire formats. Wire representations belong to shared contracts.
 
@@ -41,6 +43,7 @@ Server responsibilities are out of scope: connections, authority, pacing, deadli
 
 - **State N:** the world-state identifier. A new simulation starts at state 0. Only a real step increments it.
 - **Setup:** the phase before Start. **Started:** the phase after Start. Collection and started-empty are statuses of a started run.
+- **Metabolism**, **energy**, and **effort:** every agent's actions spend effort. An agent with a metabolism ([SPEC-008-R02](agent-definitions.md#capability-reference)) also has energy from 0 to 1, and the step converts its effort to an energy cost.
 - **Operations are synchronous.** Each call completes before the next is processed, so callers never observe the execution phase. The server serializes calls into one simulation.
 
 ## Requirements
@@ -52,14 +55,14 @@ Server responsibilities are out of scope: connections, authority, pacing, deadli
 
 ### Spawning
 
-- **SPEC-001-R03:** During setup, spawning at an explicit cell succeeds when the cell is in bounds, its terrain does not block movement, and it is unoccupied, and returns the new agent's ID. The checks run in that order: a cell outside the grid returns an out-of-bounds error, a cell whose terrain blocks movement returns a blocked error, and an occupied cell returns an occupied error. No error changes the world. Spawning does not change the state ID.
+- **SPEC-001-R03:** Spawning takes a placement and an agent definition ([SPEC-008](agent-definitions.md)), and the agent has exactly the definition's capabilities (R22). During setup, spawning at an explicit cell succeeds when the cell is in bounds, its terrain does not block movement, and it is unoccupied, and returns the new agent's ID. The checks run in that order: a cell outside the grid returns an out-of-bounds error, a cell whose terrain blocks movement returns a blocked error, and an occupied cell returns an occupied error. No error changes the world. Spawning does not change the state ID.
 - **SPEC-001-R04:** A random spawn chooses uniformly among all cells whose terrain does not block movement and that are unoccupied when the spawn is applied. It draws from the run's spawn stream. If no cell is free, it returns a no-free-cell error and changes nothing.
 - **SPEC-001-R05:** Agent IDs are unsigned 64-bit integers, assigned sequentially from 1 in successful spawn order and unique within the run. Failed spawns do not consume an ID.
 - **SPEC-001-R06:** *(Interim.)* Spawning after Start returns a not-in-setup error. Post-Start admission, as described in the CDD, will replace this rule.
 
 ### Start
 
-- **SPEC-001-R07:** Start succeeds only in setup, and only once. It opens collection targeting state 0 without executing a step or changing the state ID. It returns an empty observation for every agent, keyed by agent ID and labeled state 0. A second Start returns an already-started error. The simulation allows Start with zero agents. Rejecting a run with neither agents nor connected viewers is the server's job, and the simulation exposes its agent count for that check.
+- **SPEC-001-R07:** Start succeeds only in setup, and only once. It opens collection targeting state 0 without executing a step or changing the state ID. It returns an observation for every agent (R26), keyed by agent ID and labeled state 0. A second Start returns an already-started error. The simulation allows Start with zero agents. Rejecting a run with neither agents nor connected viewers is the server's job, and the simulation exposes its agent count for that check.
 
 ### Submission
 
@@ -93,8 +96,16 @@ Server responsibilities are out of scope: connections, authority, pacing, deadli
   - An agent can enter a cell that another agent vacated earlier in the same step.
   - No per-action outcome is returned.
 - **SPEC-001-R14:** At most one agent occupies any cell at all times.
-- **SPEC-001-R15:** After all moves execute, the state ID goes from N to N+1 and the accepted actions are cleared. Advancing returns an empty observation for every agent, keyed by agent ID and labeled N+1. Collection then targets N+1.
-- **SPEC-001-R21:** A step runs in the stages of CDD-001's [stage table](../cdd.md#step-stages), in that order, and each stage finishes before the next begins: moves run in the Actions stage, the state ID changes in the Commit stage, and observations are generated in Perception, which also produces Start's observations. Building the simulation fails if two of its systems have conflicting access to the same data without a declared order. A step runs on a single thread.
+- **SPEC-001-R15:** After all moves execute, the state ID goes from N to N+1 and the accepted actions are cleared. Advancing returns the agents the step removed (R25) and an observation for every remaining agent (R26), keyed by agent ID and labeled N+1. Collection then targets N+1.
+- **SPEC-001-R21:** A step runs in the stages of CDD-001's [stage table](../cdd.md#step-stages), in that order, and each stage finishes before the next begins: moves run in the Actions stage, energy is accounted in the Metabolism stage, starved agents are removed in the Removal stage, the state ID changes in the Commit stage, and observations are generated in Perception, which also produces Start's observations. Building the simulation fails if two of its systems have conflicting access to the same data without a declared order. A step runs on a single thread.
+
+### Metabolism
+
+- **SPEC-001-R22:** An agent spawned with a metabolism starts with energy 1. An agent without one has no energy and never starves, but still records the effort its actions spend.
+- **SPEC-001-R23:** In the Actions stage, a move by any agent adds 0.005 effort for each cell it moves. A move that fails, and a move of distance 0, add none. Each action owns its cost, so the Metabolism stage does not need to know which actions exist.
+- **SPEC-001-R24:** In the Metabolism stage, each agent with a metabolism loses its `decay` plus its effort for the step times its `rate`, as one cost, and its energy stops at 0 rather than going below. Every agent's effort is then cleared. An agent whose energy is 0 is starving.
+- **SPEC-001-R25:** In the Removal stage, starving agents are removed: each frees its cell and leaves the run, as in R18, and its ID is not reused. The step's result lists the agents it removed, in ascending ID order, each with the reason *starved*. A removed agent has no observation of the new state, and a started run whose last agent starves is started-empty. Removal happens after every action of the step, so an agent that starves still made its move, and its cell is free from the next step.
+- **SPEC-001-R26:** An observation holds what the agent perceives. An agent with a metabolism perceives its energy at full precision, after the step's Metabolism stage; an agent without one has no energy in its observation, so a bare agent's observation is empty.
 
 ### Viewer state
 
@@ -118,7 +129,7 @@ Server responsibilities are out of scope: connections, authority, pacing, deadli
 
 ## Interfaces and data
 
-The Rust API is `agora_sim::Simulation`, created from a `SimConfig` holding an `agora_env::Environment` and a seed. Operation names map to `new`, `spawn`, `start`, `submit`, `readiness`, `advance`, `view`, `remove`, `kinds`, `terrain`, and `agent_count`. Error variants correspond to the error names above. These are internal package interfaces, not wire contracts.
+The Rust API is `agora_sim::Simulation`, created from a `SimConfig` holding an `agora_env::Environment` and a seed. Operation names map to `new`, `spawn`, `start`, `submit`, `readiness`, `advance`, `view`, `remove`, `kinds`, `terrain`, and `agent_count`. `spawn` takes an `agora_env::AgentDefinition`, `advance` returns an `Advanced` with the step's `Removal`s and its `Observations`, and an `Observation`'s `energy` is present for an agent with a metabolism. `MOVE_EFFORT` is the effort per cell moved. Error variants correspond to the error names above. These are internal package interfaces, not wire contracts.
 
 ## Acceptance criteria and verification
 
@@ -133,6 +144,11 @@ Tests are in `rust/agora-sim/tests/lifecycle_and_movement.rs`, except R19's, whi
 | R05 | IDs are 1, 2, … and failed spawns don't consume an ID. | `r05_*` |
 | R06 | Spawning after Start fails. | `r06_*` |
 | R07 | Start returns state-0 observations for all agents, works with zero agents, and can't be repeated. | `r07_*` |
+| R22 | An agent with a metabolism observes energy 1 at Start, and a bare agent an empty observation; a bare agent moving for 300 steps never starves; a bare agent's move records its effort and the Metabolism stage clears it. | `r22_*`, `r22_r23_*` (unit test) |
+| R23 | Staying, a move into a wall, off the grid, or into another agent spends nothing; a successful move costs its effort times the rate. | `r23_*` |
+| R24 | Energy falls by decay plus effort times rate, and effort is cleared after each step; energy stops at 0, including when the cost is larger than what is left; the bundled forager starves after 200 or 201 idle steps and 100 or 101 moving steps. | `r24_*` |
+| R25 | A starving agent is reported as starved and removed, without an observation, leaving the run started-empty when it was the last; several are reported in ID order and their cells can be entered next step; a removed agent cannot submit or be removed again. | `r24_r25_*`, `r25_*` |
+| R26 | Energy is observed at full precision. | `r26_*` |
 | R08 | Each rejection returns its error, and a rejected submission leaves the slot open. | `r08_*` |
 | R09 | A second submission for the same agent and state is rejected; the first action executes. | `r09_*` |
 | R10 | Each status is reported, and missing agents shrink as actions are accepted. | `r10_*` |
@@ -141,8 +157,8 @@ Tests are in `rust/agora-sim/tests/lifecycle_and_movement.rs`, except R19's, whi
 | R15 | The state ID increments, observations carry N+1, and actions clear. | `r15_*` |
 | R16 | View contents, including each agent's kind, in setup and after steps. | `r16_*` |
 | R17 | Identical seeds and inputs give identical histories; different seeds can differ. | `r17_*` |
-| R19 | Every component on an agent entity is registered for reflection. | `r19_*` (unit test) |
-| R21 | The stage order in code matches the CDD's table; the step schedule runs stages in that order, and the order holds across stages with no systems; unordered conflicting systems fail the build and ordering them fixes it. Moves, the state change, and observations are covered by R12 to R15. | `r21_*` (unit tests) |
+| R19 | Every component on an agent entity, including energy, effort, and metabolism, is registered for reflection. | `r19_*` (unit test) |
+| R21 | The stage order in code matches the CDD's table; the step schedule runs stages in that order, and the order holds across stages with no systems; unordered conflicting systems fail the build and ordering them fixes it. Moves, metabolism, removal, the state change, and observations are covered by R12 to R15 and R22 to R26. | `r21_*` (unit tests) |
 | R18 | Removal frees the cell without changing the state or reusing the ID; unknown agents fail; a removed agent's action is discarded; removing the only missing agent makes the run ready; removing every agent leaves it started-empty. | `r18_*` |
 
 ## Open questions

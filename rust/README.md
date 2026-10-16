@@ -6,12 +6,12 @@ This directory is the Cargo workspace for the Rust simulation framework. [How th
 
 | Package | Purpose | Specs |
 | --- | --- | --- |
-| [`agora-client`](agora-client/) | Async client library (connection, sessions, requests, observation stream, and latest-value view and pacing handles) and the `agora-demo` random-mover executable, behind the default `demo` feature. | [SPEC-002](../docs/contracts/client-protocol.md), [SPEC-004](../docs/components/client/specs/client-library.md) |
+| [`agora-client`](agora-client/) | Async client library (connection, sessions, requests, agent event stream, and latest-value view and pacing handles) and the `agora-demo` random-mover executable, behind the default `demo` feature. | [SPEC-002](../docs/contracts/client-protocol.md), [SPEC-004](../docs/components/client/specs/client-library.md) |
 | [`agora-viewer`](agora-viewer/) | Bevy viewer: watches one run (`--create` or `--join <RUN_ID>`), draws the grid and agents, and offers Start and pacing controls in an `egui` panel. | [SPEC-005](../docs/components/viewer/specs/viewer.md) |
 | [`agora-protocol`](agora-protocol/) | Serde types for the client protocol. No networking. Tested against the shared JSON fixtures. | [SPEC-002](../docs/contracts/client-protocol.md) |
 | [`agora-server`](agora-server/) | Host application: WebSocket connections, sessions, run creation and joining, spawning, Start, action submission, step advancement, observation routing, viewers, pacing, and session and run lifetimes. Runs each simulation in its own task. | [SPEC-002](../docs/contracts/client-protocol.md), [SPEC-003](../docs/components/server/specs/sessions-and-runs.md) |
-| [`agora-env`](agora-env/) | Data-only environment definitions: the kind registry and the built-in kinds, layouts, the TOML layout and environment files, and the bundled definitions in `environments/` (layouts in `environments/layouts/`). No Bevy runtime types; the `reflect` feature derives `Reflect` for simulation components. | [SPEC-006](../docs/components/simulation/specs/kinds-and-appearance.md), [SPEC-007](../docs/components/simulation/specs/environment-definitions.md) |
-| [`agora-sim`](agora-sim/) | Headless simulation: one run's grid and terrain, agents, action collection, and step execution. Uses `bevy_ecs`, with no rendering or networking. | [SPEC-001](../docs/components/simulation/specs/lifecycle-and-movement.md), [SPEC-006](../docs/components/simulation/specs/kinds-and-appearance.md) |
+| [`agora-env`](agora-env/) | Data-only definitions: the kind registry and the built-in kinds, layouts, the TOML layout and environment files, agent definitions and their TOML agent files, and the bundled definitions in `environments/` (layouts in `environments/layouts/`) and `agents/`. No Bevy runtime types; the `reflect` feature derives `Reflect` for simulation components. | [SPEC-006](../docs/components/simulation/specs/kinds-and-appearance.md), [SPEC-007](../docs/components/simulation/specs/environment-definitions.md), [SPEC-008](../docs/components/simulation/specs/agent-definitions.md) |
+| [`agora-sim`](agora-sim/) | Headless simulation: one run's grid and terrain, agents with their definitions' capabilities, action collection, and step execution, including metabolism and starvation. Uses `bevy_ecs`, with no rendering or networking. | [SPEC-001](../docs/components/simulation/specs/lifecycle-and-movement.md), [SPEC-006](../docs/components/simulation/specs/kinds-and-appearance.md) |
 
 ## Toolchain
 
@@ -63,4 +63,4 @@ cargo run -p agora-client --bin agora-demo -- create --start-at 2
 cargo run -p agora-client --bin agora-demo -- join <RUN_ID>
 ```
 
-`create` prints the run ID, then starts the run once both agents have spawned. Each client moves its agent at random every step. `--steps N` stops after N steps, and `--help` lists the other options.
+`create` prints the run ID, then starts the run once both agents have spawned. Each client spawns a `forager` (`--agent` picks another agent catalog entry) and moves it at random every step. A forager starves after about 100 moves, and a client leaves once all its agents have been removed. `--steps N` stops after N steps, and `--help` lists the other options.

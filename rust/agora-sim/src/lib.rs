@@ -1,7 +1,8 @@
 //! Headless Agora simulation.
 //!
-//! One [`Simulation`] holds one run's world: a bounded grid, agents, action collection, and
-//! step execution. Behavior is specified by SPEC-001
+//! One [`Simulation`] holds one run's world: a bounded grid, agents with the capabilities of
+//! their agent definitions, action collection, and step execution, including metabolism and
+//! starvation. Behavior is specified by SPEC-001
 //! (`docs/components/simulation/specs/lifecycle-and-movement.md`) under the simulation CDD.
 //! Networking, authority, pacing, and rendering live in other packages.
 
@@ -13,6 +14,7 @@ mod types;
 pub use error::{AdvanceError, AgentLimitError, RemoveError, SpawnError, StartError, SubmitError};
 pub use simulation::{SimConfig, Simulation};
 pub use types::{
-    AgentId, AgentView, Direction, GridPos, MOVEMENT_BUDGET, Move, Observation, Observations,
-    Placement, Readiness, StateId, Status, Submission, ViewState,
+    Advanced, AgentId, AgentView, Direction, GridPos, MOVE_EFFORT, MOVEMENT_BUDGET, Move,
+    Observation, Observations, Placement, Readiness, Removal, RemovalReason, StateId, Status,
+    Submission, ViewState,
 };

@@ -6,8 +6,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use agora_protocol::{
-    AgentObservation, ClientMessage, CloseReason, Kind, Pacing, RequestId, ServerMessage, StateId,
-    View, Watching,
+    AgentId, AgentObservation, ClientMessage, CloseReason, Kind, Pacing, RemovalReason, RequestId,
+    ServerMessage, StateId, View, Watching,
 };
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::TcpStream;
@@ -21,10 +21,23 @@ use crate::error::ClientError;
 pub type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 /// Observations of one state for the agents this session owns, in ascending agent ID order.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ObservationBatch {
     pub state_id: StateId,
     pub observations: Vec<AgentObservation>,
+}
+
+/// A push about the session's agents, delivered in the order the server sent it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AgentEvent {
+    /// Observations of a state for the session's agents.
+    Observations(ObservationBatch),
+    /// The simulation removed one of the session's agents during a step. It precedes that
+    /// step's observations, which leave the agent out.
+    Removed {
+        agent_id: AgentId,
+        reason: RemovalReason,
+    },
 }
 
 /// A request for the connection task, with where to send its response.
@@ -35,7 +48,7 @@ pub struct Outgoing {
 
 /// Where the connection task delivers pushed messages.
 pub struct Pushes {
-    pub observations: mpsc::UnboundedSender<ObservationBatch>,
+    pub agents: mpsc::UnboundedSender<AgentEvent>,
     pub view: watch::Sender<Option<View>>,
     pub pacing: watch::Sender<Option<Pacing>>,
     /// The run's kinds and terrain, set by the first `watching` response.
@@ -106,7 +119,7 @@ pub async fn run(
         }
     }
     // Dropping `pending` fails every waiting request with `Closed`, and dropping `pushes` ends
-    // the observation stream.
+    // the agent event stream.
 }
 
 /// Whether the session continues after a message.
@@ -131,10 +144,19 @@ fn dispatch(
             state_id,
             observations,
         } => {
-            // The session may have stopped reading observations; that is its choice.
-            let _ = pushes.observations.send(ObservationBatch {
-                state_id: *state_id,
-                observations: observations.clone(),
+            // The session may have stopped reading its agent events; that is its choice.
+            let _ = pushes
+                .agents
+                .send(AgentEvent::Observations(ObservationBatch {
+                    state_id: *state_id,
+                    observations: observations.clone(),
+                }));
+            return Session::Continues;
+        }
+        ServerMessage::AgentRemoved { agent_id, reason } => {
+            let _ = pushes.agents.send(AgentEvent::Removed {
+                agent_id: *agent_id,
+                reason: *reason,
             });
             return Session::Continues;
         }

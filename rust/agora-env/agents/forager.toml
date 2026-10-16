@@ -1,0 +1,12 @@
+# A simplified forager: an agent with only a metabolism, so it has energy and can starve.
+#
+# Each table is one capability, and an agent has only the capabilities its file lists. The
+# supported capabilities and their fields are listed in SPEC-008's capability reference
+# (docs/components/simulation/specs/agent-definitions.md). An unknown capability or field is
+# an error that names the supported ones.
+
+[metabolism]
+# Energy lost every step. Energy starts at 1, and the agent starves at 0.
+decay = 0.005
+# Energy lost per unit of effort its actions spend. A move spends 0.005 per cell.
+rate = 1.0

@@ -1,10 +1,11 @@
 //! Rust client library for Agora servers.
 //!
 //! [`Client::connect`] opens a connection and completes the version handshake. Creating or
-//! joining a run turns it into a [`Session`] and its [`Observations`]. The session's methods
+//! joining a run turns it into a [`Session`] and its [`AgentEvents`]. The session's methods
 //! send requests and wait for their responses, and the library numbers requests itself; the
-//! session can be cloned so several tasks can make requests. Observations arrive in order
-//! through [`Observations::next`], owned by whichever task handles steps. The newest view and
+//! session can be cloned so several tasks can make requests. Observations, and removals of the
+//! session's agents, arrive in order through [`AgentEvents::next`], owned by whichever task
+//! handles steps. The newest view and
 //! pacing state, for viewers, are held in latest-value handles ([`Session::view`] and
 //! [`Session::pacing`]), so a slow reader skips stale states instead of queueing them.
 //!
@@ -15,8 +16,8 @@ mod client;
 mod connection;
 mod error;
 
-pub use client::{Client, Observations, Session, SessionInfo};
-pub use connection::ObservationBatch;
+pub use client::{AgentEvents, Client, Session, SessionInfo};
+pub use connection::{AgentEvent, ObservationBatch};
 pub use error::ClientError;
 
 /// Protocol types used in this library's API.

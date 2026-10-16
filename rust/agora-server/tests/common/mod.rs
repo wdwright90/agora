@@ -7,11 +7,11 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use agora_protocol::{
-    Action, ActionEntry, AgentId, CatalogEntryId, ClientMessage, Direction, EntryResult, ErrorCode,
-    ErrorResponse, PROTOCOL_VERSION, Pacing, PacingMode, Placement, RequestId, RunId,
-    ServerMessage, StateId, View, Watching,
+    Action, ActionEntry, AgentDefinitionId, AgentId, CatalogEntryId, ClientMessage, Direction,
+    EntryResult, ErrorCode, ErrorResponse, PROTOCOL_VERSION, Pacing, PacingMode, Placement,
+    RequestId, RunId, ServerMessage, StateId, View, Watching,
 };
-use agora_server::{DIVIDED_10X10, EMPTY_GRID_10X10, ServerConfig, serve};
+use agora_server::{DIVIDED_10X10, EMPTY_GRID_10X10, FORAGER, ServerConfig, serve};
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::tungstenite::Message;
@@ -43,6 +43,11 @@ pub fn empty_grid() -> CatalogEntryId {
 /// A 10 × 10 grid with a wall at x = 5, except at y = 4 and y = 5.
 pub fn divided() -> CatalogEntryId {
     CatalogEntryId::new(DIVIDED_10X10).unwrap()
+}
+
+/// The bundled forager, an agent with a metabolism.
+pub fn forager() -> AgentDefinitionId {
+    AgentDefinitionId::new(FORAGER).unwrap()
 }
 
 pub fn cell(x: u32, y: u32) -> Placement {
@@ -106,7 +111,8 @@ pub fn expect_code(message: ServerMessage, code: ErrorCode) -> ErrorResponse {
 pub struct Client {
     socket: WebSocketStream<MaybeTlsStream<TcpStream>>,
     next_request: u64,
-    /// Pushed `observations` messages not yet taken by [`Client::observations`].
+    /// Pushed `observations` and `agent_removed` messages, in arrival order, not yet taken by
+    /// [`Client::observations`] or [`Client::agent_push`].
     observations: VecDeque<ServerMessage>,
     /// Pushed views not yet taken by [`Client::view_update`].
     views: VecDeque<View>,
@@ -193,7 +199,9 @@ impl Client {
     /// Receive a message, setting pushes aside. Returns `None` for a push.
     async fn receive_or_set_aside(&mut self) -> Option<ServerMessage> {
         match self.receive_raw().await {
-            message @ ServerMessage::Observations { .. } => self.observations.push_back(message),
+            message @ (ServerMessage::Observations { .. } | ServerMessage::AgentRemoved { .. }) => {
+                self.observations.push_back(message)
+            }
             ServerMessage::ViewUpdate { view } => self.views.push_back(view),
             ServerMessage::PacingUpdate { pacing } => self.pacings.push_back(pacing),
             message => return Some(message),
@@ -220,12 +228,24 @@ impl Client {
                     observations,
                 } = message
                 else {
-                    unreachable!("only observations are kept here");
+                    panic!("expected observations, got {message:?}");
                 };
                 return (state_id, observations.iter().map(|o| o.agent_id).collect());
             }
             if let Some(message) = self.receive_or_set_aside().await {
                 panic!("expected observations, got {message:?}");
+            }
+        }
+    }
+
+    /// The next pushed `observations` or `agent_removed` message.
+    pub async fn agent_push(&mut self) -> ServerMessage {
+        loop {
+            if let Some(message) = self.observations.pop_front() {
+                return message;
+            }
+            if let Some(message) = self.receive_or_set_aside().await {
+                panic!("expected observations or agent_removed, got {message:?}");
             }
         }
     }
@@ -324,6 +344,7 @@ impl Client {
         self.exchange(&ClientMessage::Spawn {
             request_id,
             placement,
+            agent: forager(),
         })
         .await
     }

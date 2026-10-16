@@ -645,3 +645,88 @@ async fn r06_a_creator_expiring_in_setup_closes_the_run() {
     let mut late = Client::connect_with_hello(address).await;
     expect_code(late.join_run(&run_id).await, ErrorCode::UnknownRun);
 }
+
+#[tokio::test]
+async fn r17_a_starved_agent_is_reported_to_its_owner_and_leaves_the_run() {
+    let address = start_default_server().await;
+    let (mut creator, run_id) = Client::with_new_run(address).await;
+    let mut joiner = Client::joined(address, &run_id).await;
+    let mut viewer = Client::joined(address, &run_id).await;
+    // The mover spends effort every step, so it starves well before the stayer.
+    let mover = expect_spawned(creator.spawn(cell(0, 0)).await);
+    let stayer = expect_spawned(joiner.spawn(cell(5, 5)).await);
+    viewer.watch_and_control().await;
+    viewer.set_pacing(PacingMode::Unlimited).await;
+    viewer.pacing_update().await;
+    creator.start().await;
+    assert_eq!(creator.observations().await, (state(0), vec![mover]));
+    assert_eq!(joiner.observations().await, (state(0), vec![stayer]));
+
+    let mut direction = Direction::North;
+    let mut n = 0;
+    loop {
+        assert!(n < 150, "the mover did not starve");
+        creator
+            .submit(state(n), vec![step(mover, direction, 1)])
+            .await;
+        joiner.submit(state(n), vec![stay(stayer)]).await;
+        direction = match direction {
+            Direction::North => Direction::South,
+            _ => Direction::North,
+        };
+        n += 1;
+        assert_eq!(joiner.observations().await, (state(n), vec![stayer]));
+        match creator.agent_push().await {
+            ServerMessage::Observations { .. } => continue,
+            ServerMessage::AgentRemoved { agent_id, .. } => {
+                assert_eq!(agent_id, mover);
+                break;
+            }
+            other => panic!("expected a push, got {other:?}"),
+        }
+    }
+
+    // The creator has no agents left, so it receives no observations, and its entries for
+    // the starved agent are rejected.
+    let results = expect_submitted(creator.submit(state(n), vec![stay(mover)]).await);
+    assert_eq!(
+        results[0].error.as_ref().map(|e| &e.code),
+        Some(&ErrorCode::AgentNotOwned)
+    );
+    // The step no longer waits for the starved agent.
+    joiner.submit(state(n), vec![stay(stayer)]).await;
+    assert_eq!(joiner.observations().await, (state(n + 1), vec![stayer]));
+    creator.expect_silence(SETTLE).await;
+
+    // The viewer sees the run without the starved agent.
+    let mut view = viewer.view_update().await;
+    while view.state_id != state(n + 1) {
+        view = viewer.view_update().await;
+    }
+    let agents: Vec<_> = view.agents.iter().map(|a| a.agent_id).collect();
+    assert_eq!(agents, [stayer]);
+}
+
+#[tokio::test]
+async fn r17_a_run_whose_agents_all_starve_waits_started_empty() {
+    let address = start_default_server().await;
+    let (mut client, _) = Client::with_new_run(address).await;
+    let agent = expect_spawned(client.spawn(cell(0, 0)).await);
+    client.start().await;
+    client.observations().await;
+    let mut n = 0;
+    loop {
+        assert!(n < 250, "the agent did not starve");
+        client.submit(state(n), vec![stay(agent)]).await;
+        n += 1;
+        if let ServerMessage::AgentRemoved { .. } = client.agent_push().await {
+            break;
+        }
+    }
+    // No observations follow, and the run stays started with no agents.
+    client.expect_silence(SETTLE).await;
+    let watching = client.watching().await;
+    assert_eq!(watching.view.phase, RunPhase::Started);
+    assert_eq!(watching.view.state_id, state(n));
+    assert!(watching.view.agents.is_empty());
+}

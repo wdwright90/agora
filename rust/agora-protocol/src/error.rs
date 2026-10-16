@@ -76,6 +76,8 @@ error_codes! {
     RunAlreadyStarted => "run_already_started",
     /// Start was requested with no agents and no connected viewers.
     StartNotEligible => "start_not_eligible",
+    /// The agent catalog has no entry with the requested ID.
+    UnknownAgentDefinition => "unknown_agent_definition",
     /// The requested spawn cell is outside the grid.
     CellOutOfBounds => "cell_out_of_bounds",
     /// The requested spawn cell's terrain blocks movement.

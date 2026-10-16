@@ -12,14 +12,14 @@ mod version;
 
 pub use error::{ErrorCode, ErrorResponse};
 pub use ids::{
-    AgentId, CatalogEntryId, EmptyId, KindId, MAX_SAFE_INTEGER, OutOfRange, RequestId, RunId,
-    SessionId, StateId,
+    AgentDefinitionId, AgentId, CatalogEntryId, EmptyId, KindId, MAX_SAFE_INTEGER, OutOfRange,
+    RequestId, RunId, SessionId, StateId,
 };
 pub use kinds::{Appearance, Kind, Shape, TerrainClass, Unit, UnitOutOfRange};
 pub use message::{
     Action, ActionEntry, AgentObservation, AgentView, ClientMessage, CloseReason, Direction,
-    EntryError, EntryResult, InvalidTerrain, Observation, Placement, RunPhase, ServerMessage, View,
-    Watching,
+    EntryError, EntryResult, InvalidTerrain, Observation, Placement, RemovalReason, RunPhase,
+    ServerMessage, View, Watching,
 };
 pub use pacing::{IntervalMs, Pacing, PacingMode};
 pub use version::{InvalidVersion, PROTOCOL_VERSION, ProtocolVersion};

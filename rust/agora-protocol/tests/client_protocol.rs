@@ -83,6 +83,7 @@ fn r01_r08_valid_server_fixtures_round_trip_and_cover_every_type() {
             "started",
             "submitted",
             "observations",
+            "agent_removed",
             "watching",
             "view_update",
             "pacing_claimed",
@@ -141,7 +142,7 @@ fn r05_versions_parse_as_semver_core() {
     ] {
         assert!(bad.parse::<ProtocolVersion>().is_err(), "{bad:?}");
     }
-    assert_eq!(PROTOCOL_VERSION.to_string(), "0.7.0");
+    assert_eq!(PROTOCOL_VERSION.to_string(), "0.8.0");
 }
 
 #[test]
@@ -149,11 +150,11 @@ fn r06_mvp_compatibility_requires_an_exact_match() {
     let v = PROTOCOL_VERSION;
     assert!(v.is_compatible_with(v));
     for other in [
-        ProtocolVersion::new(0, 5, 0),
         ProtocolVersion::new(0, 6, 0),
-        ProtocolVersion::new(0, 7, 1),
-        ProtocolVersion::new(0, 8, 0),
-        ProtocolVersion::new(1, 7, 0),
+        ProtocolVersion::new(0, 7, 0),
+        ProtocolVersion::new(0, 8, 1),
+        ProtocolVersion::new(0, 9, 0),
+        ProtocolVersion::new(1, 8, 0),
     ] {
         assert!(!v.is_compatible_with(other), "{other}");
     }
@@ -254,4 +255,48 @@ fn r09_known_error_codes_use_their_wire_names() {
     };
     assert_eq!(error.code, ErrorCode::MalformedMessage);
     assert_eq!(error.request_id, None);
+}
+
+#[test]
+fn r11_energy_is_optional_and_from_zero_to_one() {
+    let observation = |json: &str| serde_json::from_str::<agora_protocol::Observation>(json);
+    assert_eq!(observation("{}").unwrap().energy, None);
+    for energy in ["0", "1", "0.7300000000000001"] {
+        let parsed = observation(&format!(r#"{{ "energy": {energy} }}"#)).unwrap();
+        assert_eq!(
+            parsed.energy.map(Unit::get),
+            Some(energy.parse::<f64>().unwrap())
+        );
+    }
+    for energy in ["-0.0001", "1.0001", "\"full\""] {
+        assert!(
+            observation(&format!(r#"{{ "energy": {energy} }}"#)).is_err(),
+            "{energy}"
+        );
+    }
+    // An absent sense is left out rather than sent as null.
+    let empty = serde_json::to_value(agora_protocol::Observation::default()).unwrap();
+    assert_eq!(empty, serde_json::json!({}));
+}
+
+#[test]
+fn r16_unknown_removal_reasons_are_read_as_other() {
+    let text = r#"{ "type": "agent_removed", "agent_id": 2, "reason": "eaten" }"#;
+    let message: ServerMessage = serde_json::from_str(text).unwrap();
+    assert_eq!(
+        message,
+        ServerMessage::AgentRemoved {
+            agent_id: agora_protocol::AgentId::new(2).unwrap(),
+            reason: agora_protocol::RemovalReason::Other,
+        }
+    );
+    assert_eq!(message.request_id(), None);
+}
+
+#[test]
+fn r09_unknown_agent_definition_uses_its_wire_name() {
+    assert_eq!(
+        ErrorCode::UnknownAgentDefinition.as_str(),
+        "unknown_agent_definition"
+    );
 }

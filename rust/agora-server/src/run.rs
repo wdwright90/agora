@@ -7,15 +7,15 @@
 use std::collections::HashMap;
 use std::future;
 
-use agora_env::{Environment, KindRegistry, Look, TerrainClass};
+use agora_env::{AgentDefinition, Environment, KindRegistry, Look, TerrainClass};
 use agora_protocol::{
     AgentObservation, AgentView, Appearance, CatalogEntryId, CloseReason, IntervalMs, Kind, KindId,
-    Observation, Pacing, PacingMode, RunId, RunPhase, ServerMessage, SessionId, Shape, StateId,
-    Unit, View,
+    Observation, Pacing, PacingMode, RemovalReason, RunId, RunPhase, ServerMessage, SessionId,
+    Shape, StateId, Unit, View,
 };
 use agora_sim::{
-    AgentId, Move, Observations, Placement, SimConfig, Simulation, SpawnError, Status, Submission,
-    SubmitError,
+    AgentId, Move, Observations, Placement, Removal, SimConfig, Simulation, SpawnError, Status,
+    Submission, SubmitError,
 };
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{Instant, sleep_until};
@@ -97,6 +97,7 @@ enum Command {
     Spawn {
         session: SessionId,
         placement: Placement,
+        agent: AgentDefinition,
         reply: oneshot::Sender<Result<AgentId, SpawnError>>,
     },
     Start {
@@ -158,15 +159,17 @@ impl RunHandle {
         self.call(|reply| Command::Join { outbox, reply }).await
     }
 
-    /// Spawn an agent owned by `session`.
+    /// Spawn an agent owned by `session`, with the capabilities of `agent`.
     pub async fn spawn(
         &self,
         session: SessionId,
         placement: Placement,
+        agent: AgentDefinition,
     ) -> Result<Result<AgentId, SpawnError>, RunGone> {
         self.call(|reply| Command::Spawn {
             session,
             placement,
+            agent,
             reply,
         })
         .await
@@ -383,9 +386,10 @@ impl Run {
             Command::Spawn {
                 session,
                 placement,
+                agent,
                 reply,
             } => {
-                let result = self.sim.spawn(placement);
+                let result = self.sim.spawn(placement, &agent);
                 if let Ok(agent) = result {
                     self.session_mut(&session).agents.push(agent);
                     info!(%session, agent = agent.0, "agent spawned");
@@ -613,10 +617,36 @@ impl Run {
             Gate::Closed => return,
         }
         self.pacer.step_started(now);
-        let observations = self.sim.advance().expect("the run is ready to advance");
-        debug!(state = observations.state.0, "step executed");
-        self.deliver(&observations);
+        let advanced = self.sim.advance().expect("the run is ready to advance");
+        debug!(state = advanced.observations.state.0, "step executed");
+        self.removed(&advanced.removed);
+        self.deliver(&advanced.observations);
         self.publish_view();
+    }
+
+    /// Drop agents the step removed from their sessions, and push each removal to the owning
+    /// session if it is connected. The pushes precede the step's observations.
+    fn removed(&mut self, removals: &[Removal]) {
+        for removal in removals {
+            let Some((id, session)) = self
+                .sessions
+                .iter_mut()
+                .find(|(_, session)| session.agents.contains(&removal.agent))
+            else {
+                continue;
+            };
+            session.agents.retain(|&agent| agent != removal.agent);
+            let reason = match removal.reason {
+                agora_sim::RemovalReason::Starved => RemovalReason::Starved,
+            };
+            info!(session = %id, agent = removal.agent.0, ?reason, "agent removed");
+            if let Some(outbox) = &session.outbox {
+                let _ = outbox.send(ServerMessage::AgentRemoved {
+                    agent_id: wire_agent_id(removal.agent),
+                    reason,
+                });
+            }
+        }
     }
 
     /// A viewer stopped viewing: hand pacing control to the remaining viewer with the oldest
@@ -677,8 +707,7 @@ impl Run {
                 .agents
                 .iter()
                 .map(|agent| AgentView {
-                    agent_id: agora_protocol::AgentId::new(agent.id.0)
-                        .expect("agent IDs stay below 2^53"),
+                    agent_id: wire_agent_id(agent.id),
                     kind: wire_kind_id(&agent.kind),
                     x: agent.position.x,
                     y: agent.position.y,
@@ -702,12 +731,16 @@ impl Run {
             let observations = session
                 .agents
                 .iter()
-                .filter(|agent| observations.by_agent.contains_key(agent))
-                .map(|agent| AgentObservation {
-                    agent_id: agora_protocol::AgentId::new(agent.0)
-                        .expect("agent IDs stay below 2^53"),
-                    // Simulation observations are empty for the MVP.
-                    observation: Observation {},
+                .filter_map(|agent| {
+                    let observation = observations.by_agent.get(agent)?;
+                    Some(AgentObservation {
+                        agent_id: wire_agent_id(*agent),
+                        observation: Observation {
+                            energy: observation
+                                .energy
+                                .map(|energy| Unit::new(energy).expect("energy is from 0 to 1")),
+                        },
+                    })
                 })
                 .collect();
             // A connection that has just closed drops its receiver; its disconnect follows.
@@ -868,6 +901,10 @@ fn wire_appearance(appearance: agora_env::Appearance) -> Appearance {
             agora_env::Shape::Round => Shape::Round,
         },
     }
+}
+
+fn wire_agent_id(agent: AgentId) -> agora_protocol::AgentId {
+    agora_protocol::AgentId::new(agent.0).expect("agent IDs stay below 2^53")
 }
 
 fn wire_kind_id(id: &agora_env::KindId) -> KindId {

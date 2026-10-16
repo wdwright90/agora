@@ -152,3 +152,8 @@ opaque_string!(
     /// Kind identifier, declared once in the run's kind registry.
     KindId
 );
+
+opaque_string!(
+    /// Agent catalog entry identifier, naming the agent definition a spawned agent gets.
+    AgentDefinitionId
+);

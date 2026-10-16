@@ -5,8 +5,10 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::error::{ErrorCode, ErrorResponse};
-use crate::ids::{AgentId, CatalogEntryId, KindId, RequestId, RunId, SessionId, StateId};
-use crate::kinds::Kind;
+use crate::ids::{
+    AgentDefinitionId, AgentId, CatalogEntryId, KindId, RequestId, RunId, SessionId, StateId,
+};
+use crate::kinds::{Kind, Unit};
 use crate::pacing::{Pacing, PacingMode};
 use crate::version::ProtocolVersion;
 
@@ -27,10 +29,12 @@ pub enum ClientMessage {
         request_id: RequestId,
         run_id: RunId,
     },
-    /// Spawn an agent owned by this session.
+    /// Spawn an agent owned by this session, with the capabilities of the agent catalog entry
+    /// `agent`.
     Spawn {
         request_id: RequestId,
         placement: Placement,
+        agent: AgentDefinitionId,
     },
     /// Close setup and start the run. Creator only.
     Start { request_id: RequestId },
@@ -137,6 +141,12 @@ pub enum ServerMessage {
         state_id: StateId,
         observations: Vec<AgentObservation>,
     },
+    /// Pushed by the server, not a response: the simulation removed one of this session's
+    /// agents during a step. It precedes that step's observations.
+    AgentRemoved {
+        agent_id: AgentId,
+        reason: RemovalReason,
+    },
     /// Successful `watch`: the session is a viewer.
     Watching(Watching),
     /// Pushed by the server, not a response: the run's newest state, for viewers.
@@ -179,6 +189,7 @@ impl ServerMessage {
             Self::Error(error) => error.request_id,
             Self::Welcome { .. }
             | Self::Observations { .. }
+            | Self::AgentRemoved { .. }
             | Self::ViewUpdate { .. }
             | Self::PacingUpdate { .. }
             | Self::RunClosed { .. } => None,
@@ -317,15 +328,30 @@ pub struct EntryError {
 }
 
 /// One agent's observation of a state.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentObservation {
     pub agent_id: AgentId,
     pub observation: Observation,
 }
 
-/// An agent observation. Empty in this version; later versions add fields.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Observation {}
+/// An agent observation. Each sense is present only if the agent has it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Observation {
+    /// The agent's energy, from 0 to 1. Present when the agent has a metabolism.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub energy: Option<Unit>,
+}
+
+/// Why the simulation removed an agent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RemovalReason {
+    /// Its energy reached 0.
+    Starved,
+    /// A reason this version does not know.
+    #[serde(other)]
+    Other,
+}
 
 /// A complete view of a run's world, separate from agent observations.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
