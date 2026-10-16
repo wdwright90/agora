@@ -1,10 +1,10 @@
 # Handoff
 
-Checkpoint: 2026-10-15. Chunks 1 to 3, 4.1, and 4.2 are merged (#17 to #21). Chunk 4.3, metabolism, is implemented on branch `feature/metabolism` and not yet committed or opened as a PR.
+Checkpoint: 2026-10-15. Chunks 1 to 3, 4.1, and 4.2 are merged (#17 to #21). Chunk 4.3, metabolism, is in review as [#22](https://github.com/wdwright90/agora/pull/22) from branch `feature/metabolism`.
 
 ## Resume here
 
-Review the 4.3 changes with the maintainer, then commit and open the PR against `develop` once they agree. After it merges, agree the details of 4.4 (food): the ecology file format and the environment file's `ecology` field, food items and their placement, diets on agent definitions (a new capability or part of `metabolism`), automatic eating in the Interactions stage, and the maintain rule.
+Wait for #22 to be reviewed and merged. After it merges, agree the details of 4.4 (food): the ecology file format and the environment file's `ecology` field, food items and their placement, diets on agent definitions (a new capability or part of `metabolism`), automatic eating in the Interactions stage, and the maintain rule.
 
 ## Chunk 4.3: metabolism
 
