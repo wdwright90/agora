@@ -1,0 +1,1 @@
+{ "type": "error", "request_id": 2, "code": "unknown_agent_definition", "message": "no agent definition \"grazer\"", "details": { "agent": "grazer" } }

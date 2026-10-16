@@ -1,10 +1,12 @@
-//! The layout and environment files bundled with Agora, compiled into the program (SPEC-007).
+//! The layout, environment, and agent files bundled with Agora, compiled into the program
+//! (SPEC-007, SPEC-008).
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use thiserror::Error;
 
+use crate::agent::{AgentDefinition, AgentDefinitionError};
 use crate::definition::DefinitionError;
 use crate::environment::Environment;
 use crate::kinds::KindRegistry;
@@ -38,6 +40,10 @@ pub const ENVIRONMENTS: &[(&str, &str)] = &[
     ),
 ];
 
+/// Each bundled agent definition's catalog entry ID and TOML source, in catalog order. The
+/// files are in this package's `agents` directory, named after their IDs.
+pub const AGENTS: &[(&str, &str)] = &[("forager", include_str!("../agents/forager.toml"))];
+
 /// Why the bundled files could not be loaded, naming the file that failed.
 #[derive(Debug, Clone, Error)]
 pub enum BundledError {
@@ -50,6 +56,11 @@ pub enum BundledError {
     Environment {
         id: &'static str,
         error: DefinitionError,
+    },
+    #[error("bundled agent {id} is invalid: {error}")]
+    Agent {
+        id: &'static str,
+        error: AgentDefinitionError,
     },
 }
 
@@ -74,6 +85,18 @@ pub fn environments(
             Environment::from_toml(source, Arc::clone(&kinds), &layouts)
                 .map(|environment| (id, environment))
                 .map_err(|error| BundledError::Environment { id, error })
+        })
+        .collect()
+}
+
+/// Load every bundled agent definition, in catalog order.
+pub fn agents() -> Result<Vec<(&'static str, AgentDefinition)>, BundledError> {
+    AGENTS
+        .iter()
+        .map(|&(id, source)| {
+            AgentDefinition::from_toml(source)
+                .map(|definition| (id, definition))
+                .map_err(|error| BundledError::Agent { id, error })
         })
         .collect()
 }

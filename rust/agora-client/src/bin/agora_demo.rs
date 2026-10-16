@@ -1,15 +1,16 @@
 //! `agora-demo`: a client whose agents move at random.
 //!
 //! `agora-demo create` creates a run, prints its ID, and starts it once the run has enough
-//! agents. `agora-demo join <RUN_ID>` joins a run. Both spawn agents and move each one a random
-//! cardinal step every state until stopped.
+//! agents. `agora-demo join <RUN_ID>` joins a run. Both spawn agents from the agent catalog and
+//! move each one a random cardinal step every state until stopped or until all of them have
+//! been removed, for example by starving.
 
 use std::process::ExitCode;
 
 use agora_client::protocol::{
-    Action, ActionEntry, CatalogEntryId, Direction, PacingMode, Placement, RunId,
+    Action, ActionEntry, AgentDefinitionId, CatalogEntryId, Direction, PacingMode, Placement, RunId,
 };
-use agora_client::{Client, ClientError, Observations, Session};
+use agora_client::{AgentEvent, AgentEvents, Client, ClientError, Session};
 use clap::{Parser, Subcommand};
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
@@ -29,6 +30,9 @@ struct Args {
     /// Agents to spawn.
     #[arg(long, default_value_t = 1)]
     agents: u32,
+    /// The agent catalog entry each agent is spawned from.
+    #[arg(long, default_value = "forager", value_parser = parse_agent)]
+    agent: AgentDefinitionId,
     /// Seed for the random moves. Omit it for a random seed.
     #[arg(long)]
     seed: Option<u64>,
@@ -84,7 +88,7 @@ async fn main() -> ExitCode {
 
 async fn run(args: Args) -> Result<(), ClientError> {
     let client = Client::connect(&args.server).await?;
-    let (session, mut observations) = match &args.command {
+    let (session, mut events) = match &args.command {
         Command::Create { .. } => {
             let entry = CatalogEntryId::new(CATALOG_ENTRY).expect("the entry ID is non-empty");
             let established = client.create_run(entry).await?;
@@ -97,7 +101,7 @@ async fn run(args: Args) -> Result<(), ClientError> {
     info!(run = %session.info().run_id, "session established");
 
     for _ in 0..args.agents {
-        let agent = session.spawn(Placement::Random).await?;
+        let agent = session.spawn(Placement::Random, args.agent.clone()).await?;
         info!(agent = agent.get(), "agent spawned");
     }
 
@@ -118,11 +122,15 @@ async fn run(args: Args) -> Result<(), ClientError> {
         Some(seed) => StdRng::seed_from_u64(seed),
         None => rand::make_rng(),
     };
-    move_randomly(&session, &mut observations, &mut rng, args.steps).await
+    move_randomly(&session, &mut events, &mut rng, args.agents, args.steps).await
 }
 
 fn parse_run_id(text: &str) -> Result<RunId, String> {
     RunId::new(text).ok_or_else(|| "the run ID is empty".to_owned())
+}
+
+fn parse_agent(text: &str) -> Result<AgentDefinitionId, String> {
+    AgentDefinitionId::new(text).ok_or_else(|| "the agent ID is empty".to_owned())
 }
 
 /// Watch the run until it has `agents` agents, then start it.
@@ -153,11 +161,13 @@ async fn start_when_ready(
     Ok(())
 }
 
-/// Answer each observation batch with a random step for every agent in it.
+/// Answer each observation batch with a random step for every agent in it. Leave once every
+/// agent has been removed.
 async fn move_randomly(
     session: &Session,
-    observations: &mut Observations,
+    events: &mut AgentEvents,
     rng: &mut StdRng,
+    mut agents: u32,
     steps: Option<u64>,
 ) -> Result<(), ClientError> {
     const DIRECTIONS: [Direction; 4] = [
@@ -166,7 +176,19 @@ async fn move_randomly(
         Direction::South,
         Direction::West,
     ];
-    while let Some(batch) = observations.next().await {
+    while let Some(event) = events.next().await {
+        let batch = match event {
+            AgentEvent::Observations(batch) => batch,
+            AgentEvent::Removed { agent_id, reason } => {
+                info!(agent = agent_id.get(), ?reason, "agent removed");
+                agents -= 1;
+                if agents == 0 {
+                    info!("every agent has been removed");
+                    return session.leave().await;
+                }
+                continue;
+            }
+        };
         let state = batch.state_id.get();
         info!(state, "observed");
         if steps.is_some_and(|steps| state >= steps) {

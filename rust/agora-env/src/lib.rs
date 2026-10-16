@@ -1,4 +1,4 @@
-//! Data-only Agora environment definitions.
+//! Data-only Agora environment and agent definitions.
 //!
 //! A [`KindRegistry`] declares every kind in a run once: terrain with its class and flags, and
 //! items and creatures with their [`Appearance`]. It is the single source of truth for how
@@ -11,9 +11,15 @@
 //! SPEC-006 (`docs/components/simulation/specs/kinds-and-appearance.md`) and SPEC-007
 //! (`docs/components/simulation/specs/environment-definitions.md`).
 //!
+//! An [`AgentDefinition`] lists the capabilities an agent is spawned with, such as a
+//! [`Metabolism`], and loads from a TOML agent file (SPEC-008,
+//! `docs/components/simulation/specs/agent-definitions.md`). Agent definitions are separate
+//! from environments.
+//!
 //! This package holds no Bevy runtime types, so tools can use it without the simulation. The
 //! `reflect` feature derives `bevy_reflect::Reflect` on the types simulation components hold.
 
+mod agent;
 pub mod builtin;
 pub mod bundled;
 mod definition;
@@ -21,6 +27,7 @@ mod environment;
 mod kinds;
 mod layout;
 
+pub use agent::{AgentDefinition, AgentDefinitionError, Metabolism};
 pub use definition::DefinitionError;
 pub use environment::{Environment, EnvironmentError};
 pub use kinds::{

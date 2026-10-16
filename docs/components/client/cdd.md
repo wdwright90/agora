@@ -22,9 +22,9 @@ The demo sits behind the `demo` feature, which is on by default. It enables the 
 
 ## Internal structure
 
-- **`Client`:** a connection that has completed the `hello` handshake but has no session. Creating or joining a run consumes it and returns a `Session` with its `Observations`, so a connection carries at most one session, as the protocol requires. A program that takes part in several runs opens a connection for each.
+- **`Client`:** a connection that has completed the `hello` handshake but has no session. Creating or joining a run consumes it and returns a `Session` with its `AgentEvents`, so a connection carries at most one session, as the protocol requires. A program that takes part in several runs opens a connection for each.
 - **`Session`:** a cheap, cloneable handle for requests (`spawn`, `start`, `submit`, `watch`, `claim_pacing`, `set_pacing`, and `step_once`) and for the latest-value handles. Clones share one session, so several tasks can make requests at once: for example, a viewer's UI task sending pacing changes while another task renders, or one task per agent submitting its action.
-- **`Observations`:** the session's observation stream. It is returned once, alongside the session, so exactly one task owns it and handles steps, while other tasks keep using clones of the session.
+- **`AgentEvents`:** the session's agent event stream: observation batches, and removals of its agents, in server order. It is returned once, alongside the session, so exactly one task owns it and handles steps, while other tasks keep using clones of the session.
 - **Request numbering:** a session numbers its requests from 1, the request that established it. Allocating a number and queueing the request happen under one lock, so requests reach the server in number order even when several tasks send at once.
 - **Connection task:** one background task owns the socket. It writes queued requests, matches each response to its waiting request by request ID, and routes pushed messages.
 
@@ -32,7 +32,7 @@ The demo sits behind the `demo` feature, which is on by default. It enables the 
 
 Pushed messages reach the application in two forms:
 
-- **Observations** arrive through a stream (`Observations::next`), one batch per state, in the order the server sent them. Agent code must see every state, so none are dropped.
+- **Agent events** arrive through a stream (`AgentEvents::next`): one observation batch per state, and a removal event for each agent the simulation removes, in the order the server sent them, so a removal arrives before the observations that leave its agent out. Agent code must see every state and every removal, so none are dropped. Removals share the observations' stream because their order relative to observations matters.
 - **Views and pacing state** are held in latest-value handles (`Session::view` and `Session::pacing`, Tokio `watch` receivers). Only the newest value matters for display, so a reader that falls behind sees the current state and skips stale ones, matching the server's newest-only delivery. A Bevy viewer can read them once per frame.
 
 Callbacks were rejected because handlers would run inside the library's task, which fits poorly with async code and with Bevy. A single stream for all pushes was rejected because views would queue up behind a slow reader.
@@ -44,19 +44,19 @@ Failures are `ClientError` values: a transport failure, a server rejection carry
 ## Data flow and lifecycle
 
 - **Connect:** open the WebSocket, send `hello`, and require `welcome`.
-- **Establish:** start the connection task, send `create_run` or `join_run` as request 1, and return the session, with the server's session information, and its observation stream.
+- **Establish:** start the connection task, send `create_run` or `join_run` as request 1, and return the session, with the server's session information, and its agent event stream.
 - **Request:** queue the request with the next number and a reply slot, then wait. The connection task writes it and, when the response arrives, completes the reply slot. A server `error` becomes `ClientError::Rejected`.
-- **Push:** `observations` go to the stream. `view_update` and `pacing_update` replace the latest values. A `watching` response fills both handles, and sets the run's kinds (`Session::kinds`), before the caller sees it. Kinds do not change during a run, so they are held once rather than in a latest-value handle.
-- **Close:** when the session leaves or closes its run, or the server sends `run_closed`, the connection task closes the socket. When the socket closes for any reason, waiting and later requests fail, with `ClientError::RunClosed` if the server closed the run and `ClientError::Closed` otherwise, and the observation stream ends after any batches already received. Dropping every clone of the session also closes the connection.
+- **Push:** `observations` and `agent_removed` go to the stream. `view_update` and `pacing_update` replace the latest values. A `watching` response fills both handles, and sets the run's kinds (`Session::kinds`), before the caller sees it. Kinds do not change during a run, so they are held once rather than in a latest-value handle.
+- **Close:** when the session leaves or closes its run, or the server sends `run_closed`, the connection task closes the socket. When the socket closes for any reason, waiting and later requests fail, with `ClientError::RunClosed` if the server closed the run and `ClientError::Closed` otherwise, and the agent event stream ends after any events already received. Dropping every clone of the session also closes the connection.
 
 ## The demo client
 
-`agora-demo` moves every agent it owns one random cardinal step each state. `create` creates a run on the `empty-grid-10x10` catalog entry, prints the run ID on standard output, watches the run, and starts it once the view shows enough agents. `join` joins a run by ID. Both stop after a set number of steps or when interrupted. Watching makes the creating demo a viewer, so its run is paced at the server's default interval unless `--unlimited` claims pacing control and removes it.
+`agora-demo` moves every agent it owns one random cardinal step each state. `create` creates a run on the `empty-grid-10x10` catalog entry, prints the run ID on standard output, watches the run, and starts it once the view shows enough agents. `join` joins a run by ID. Both spawn their agents from an agent catalog entry (`forager` by default), and stop after a set number of steps, once all their agents have been removed, or when interrupted. Watching makes the creating demo a viewer, so its run is paced at the server's default interval unless `--unlimited` claims pacing control and removes it.
 
 ## Design constraints and rationale
 
 - **Async on tokio.** The viewer will run the library on a background runtime, and agent clients usually wait on the network. The maintainer chose async on 2026-09-27.
-- **The observation stream is separate from the session.** Requests need shared access from several tasks, but reading a stream needs one owner. Keeping both in one value meant a shared session could not read its observations; the first draft had this flaw, found in review.
+- **The agent event stream is separate from the session.** Requests need shared access from several tasks, but reading a stream needs one owner. Keeping both in one value meant a shared session could not read its observations; the first draft had this flaw, found in review.
 - **No retries.** Without session recovery, a lost connection ends the session, so the library does not retry requests. It still sends every request with a fresh number, as the protocol requires.
 
 ## Detailed specifications

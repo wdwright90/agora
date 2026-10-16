@@ -1,1 +1,1 @@
-{ "type": "observations", "state_id": 1, "observations": [{ "agent_id": 1, "observation": {} }, { "agent_id": 2, "observation": {} }] }
+{ "type": "observations", "state_id": 1, "observations": [{ "agent_id": 1, "observation": { "energy": 0.73 } }, { "agent_id": 2, "observation": {} }] }

@@ -134,8 +134,22 @@ Details agreed on 2026-10-03, while scoping 4.2:
 
 **Metabolism and exertion:**
 
-- Metabolism is an agent property. Until capability declarations (chunk 6), every agent gets a built-in default metabolism.
+- Metabolism is an agent property. Until capability declarations (chunk 6), every agent gets a built-in default metabolism. (Revised on 2026-10-12: nothing is defaulted, and an agent has a metabolism only if its agent definition gives it one; see [chunk 4.3 details](#chunk-43-details).)
 - Actions add the effort they spend to an **exertion** component, and each action owns its cost: a move adds effort per cell moved, and a failed move adds none. The Metabolism stage converts exertion to energy with the metabolism's rate (1 for now), applies decay, clears exertion, and then checks for starvation, after every energy change in the step. Metabolism therefore never needs to know which actions exist, and a later fatigue sense (M4) can read the same exertion.
+
+### Chunk 4.3 details
+
+Agreed with the maintainer on 2026-10-12, while scoping 4.3:
+
+- **Almost nothing is defaulted.** Agents have a capability only when they are spawned with it, and clients are explicit about what their agents can do. This replaces the built-in default metabolism agreed on 2026-09-30.
+- **A catalog of premade agents** instead of capability declarations for now. The bundled catalog's first entry is a simplified `forager` with only a metabolism, so 4.3 does not need the capability declaration feature (chunk 6). A spawn names a catalog entry in a required `agent` field; an unknown one returns `unknown_agent_definition`. The term is **agent definition**, matching layout and environment definitions.
+- **Easy to write by hand.** Agent files are TOML whose tables are capabilities. SPEC-008 has a capability reference table, checked against the loader by a test, and an unknown capability or field is an error naming the supported ones.
+- **Spawning a default agent with added capabilities** is wanted, but later, with chunk 6.
+- **Stored agents** live on the server; clients that keep their own definitions do so on their side. A **browsable catalog**, which a client or a person can filter by capability, is wanted eventually. Neither is scheduled yet; the [roadmap](../../docs/roadmap.md#agent-catalog-direction) places them.
+- **Energy is in the observation now**, as `energy` at full precision, for agents with a metabolism (protocol 0.8.0).
+- **Placeholder numbers:** decay 0.005 per step, move effort 0.005 per cell, rate 1, starting energy 1. A forager starves after about 200 idle steps or about 100 moving. The maintainer wants help tuning them if they get in the way of training.
+- **Push ordering:** `submitted`, then `agent_removed` for each removed agent, then the step's `observations`.
+- **Choices made in implementation:** the client library's observation stream became an agent event stream carrying observations and removals in server order (`AgentEvents`, `AgentEvent`), because a session whose last agent starves receives no further observations to attach a removal to. The demo leaves once all its agents are removed. Effort is recorded only for agents with a metabolism, since nothing reads it otherwise yet.
 
 **Direction, not yet designed:**
 

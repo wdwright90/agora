@@ -12,6 +12,14 @@ A Python trainer teaches a neural network to forage in a few simple environments
 
 Estimate: 3 to 5 weeks, about 14 to 18 PRs. The platform and simulation work is fairly predictable (about 2 to 3 weeks); getting training to work well is the main uncertainty.
 
+### Agent catalog direction
+
+Agreed on 2026-10-12, while scoping AGORA-005 chunk 4.3: agents have almost nothing by default, and clients are explicit about the capabilities their agents have. Agora offers a catalog of premade agent definitions, starting with a simplified forager. Later work, not yet scheduled in detail:
+
+- **Declared capabilities** (M2, chunk 6): versioned capability declarations published by the server, and spawning a catalog agent with capabilities added, or a bare agent with capabilities listed.
+- **A browsable catalog** (with or after chunk 6): a client or a person can list the premade agents and filter them by capability.
+- **Stored agents** (with or after M6): agent definitions stored on the server and reused later, which need ownership and so follow authentication. Clients may keep their own definitions on their side; that is up to them.
+
 ## M3 — Multiple agents
 
 Several agents in one run: competition for food, species with different diets and appearances, spawning after Start, and shared or separate policies.

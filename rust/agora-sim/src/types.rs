@@ -9,6 +9,9 @@ use bevy_reflect::Reflect;
 /// Maximum total movement distance an MVP agent may request in one step.
 pub const MOVEMENT_BUDGET: u32 = 1;
 
+/// Effort a move adds to an agent's exertion for each cell it moves. A failed move adds none.
+pub const MOVE_EFFORT: f64 = 0.005;
+
 /// Run-unique agent identifier, assigned in spawn order starting at 1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Reflect)]
 pub struct AgentId(pub u64);
@@ -110,15 +113,40 @@ pub enum Placement {
     Random,
 }
 
-/// An agent observation. Empty for the MVP; richer perception is later work.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct Observation {}
+/// What an agent perceives of a state. Each sense is present only if the agent has it.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Observation {
+    /// The agent's energy, from 0 to 1, at full precision. Present when it has a metabolism.
+    pub energy: Option<f64>,
+}
 
 /// Observations for a completed state, keyed by agent ID.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Observations {
     pub state: StateId,
     pub by_agent: BTreeMap<AgentId, Observation>,
+}
+
+/// Why the simulation removed an agent during a step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RemovalReason {
+    /// Its energy reached 0.
+    Starved,
+}
+
+/// An agent the simulation removed during a step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Removal {
+    pub agent: AgentId,
+    pub reason: RemovalReason,
+}
+
+/// The result of a step: the agents it removed and the observations of the new state.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Advanced {
+    /// Agents removed during the step, in ascending ID order. They have no observations.
+    pub removed: Vec<Removal>,
+    pub observations: Observations,
 }
 
 /// Status reported by a readiness query.

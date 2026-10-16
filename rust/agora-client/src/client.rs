@@ -3,18 +3,16 @@
 use std::sync::{Arc, Mutex, PoisonError};
 
 use agora_protocol::{
-    ActionEntry, AgentId, CatalogEntryId, ClientMessage, CloseReason, EntryResult, Kind,
-    PROTOCOL_VERSION, Pacing, PacingMode, Placement, RequestId, RunId, RunPhase, ServerMessage,
-    SessionId, StateId, View, Watching,
+    ActionEntry, AgentDefinitionId, AgentId, CatalogEntryId, ClientMessage, CloseReason,
+    EntryResult, Kind, PROTOCOL_VERSION, Pacing, PacingMode, Placement, RequestId, RunId, RunPhase,
+    ServerMessage, SessionId, StateId, View, Watching,
 };
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 
-use crate::connection::{
-    self, ClosedReason, ObservationBatch, Outgoing, Pushes, Socket, WatchedRun,
-};
+use crate::connection::{self, AgentEvent, ClosedReason, Outgoing, Pushes, Socket, WatchedRun};
 use crate::error::ClientError;
 
 /// A connection that has completed the version handshake but has no session yet.
@@ -42,11 +40,11 @@ impl Client {
     }
 
     /// Create a run from a catalog entry. The new session holds creator authority. Returns the
-    /// session and its observation stream.
+    /// session and its agent event stream.
     pub async fn create_run(
         self,
         catalog_entry: CatalogEntryId,
-    ) -> Result<(Session, Observations), ClientError> {
+    ) -> Result<(Session, AgentEvents), ClientError> {
         self.establish(|request_id| ClientMessage::CreateRun {
             request_id,
             catalog_entry,
@@ -54,8 +52,8 @@ impl Client {
         .await
     }
 
-    /// Join an existing run. Returns the session and its observation stream.
-    pub async fn join_run(self, run_id: RunId) -> Result<(Session, Observations), ClientError> {
+    /// Join an existing run. Returns the session and its agent event stream.
+    pub async fn join_run(self, run_id: RunId) -> Result<(Session, AgentEvents), ClientError> {
         self.establish(|request_id| ClientMessage::JoinRun { request_id, run_id })
             .await
     }
@@ -63,9 +61,9 @@ impl Client {
     async fn establish(
         self,
         request: impl FnOnce(RequestId) -> ClientMessage,
-    ) -> Result<(Session, Observations), ClientError> {
+    ) -> Result<(Session, AgentEvents), ClientError> {
         let (requests, receiver) = mpsc::unbounded_channel();
-        let (observations_sender, observations) = mpsc::unbounded_channel();
+        let (agents_sender, agents) = mpsc::unbounded_channel();
         let (view_sender, view) = watch::channel(None);
         let (pacing_sender, pacing) = watch::channel(None);
         let watched = WatchedRun::default();
@@ -74,7 +72,7 @@ impl Client {
             self.socket,
             receiver,
             Pushes {
-                observations: observations_sender,
+                agents: agents_sender,
                 view: view_sender,
                 pacing: pacing_sender,
                 watched: watched.clone(),
@@ -118,12 +116,7 @@ impl Client {
             pacing,
             watched,
         };
-        Ok((
-            session,
-            Observations {
-                receiver: observations,
-            },
-        ))
+        Ok((session, AgentEvents { receiver: agents }))
     }
 }
 
@@ -157,12 +150,18 @@ impl Session {
         &self.info
     }
 
-    /// Spawn an agent owned by this session and return its ID.
-    pub async fn spawn(&self, placement: Placement) -> Result<AgentId, ClientError> {
+    /// Spawn an agent owned by this session, with the capabilities of the agent catalog entry
+    /// `agent`, and return its ID.
+    pub async fn spawn(
+        &self,
+        placement: Placement,
+        agent: AgentDefinitionId,
+    ) -> Result<AgentId, ClientError> {
         match self
             .call(|request_id| ClientMessage::Spawn {
                 request_id,
                 placement,
+                agent,
             })
             .await?
         {
@@ -316,16 +315,16 @@ impl Session {
     }
 }
 
-/// A session's observations, in the order the server sent them. It is returned once, with
-/// the session, so exactly one task owns it.
-pub struct Observations {
-    receiver: mpsc::UnboundedReceiver<ObservationBatch>,
+/// A session's agent events, observations and removals, in the order the server sent them.
+/// It is returned once, with the session, so exactly one task owns it.
+pub struct AgentEvents {
+    receiver: mpsc::UnboundedReceiver<AgentEvent>,
 }
 
-impl Observations {
-    /// The next observations for the session's agents. Returns `None` once the connection has
-    /// closed and every batch already received has been returned.
-    pub async fn next(&mut self) -> Option<ObservationBatch> {
+impl AgentEvents {
+    /// The next event for the session's agents. Returns `None` once the connection has closed
+    /// and every event already received has been returned.
+    pub async fn next(&mut self) -> Option<AgentEvent> {
         self.receiver.recv().await
     }
 }

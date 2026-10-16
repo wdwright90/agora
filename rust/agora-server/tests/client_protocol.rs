@@ -4,13 +4,13 @@
 mod common;
 
 use agora_protocol::{
-    AgentId, AgentView, ClientMessage, CloseReason, Direction, ErrorCode, IntervalMs, KindId,
-    PROTOCOL_VERSION, Pacing, PacingMode, Placement, ProtocolVersion, RunId, RunPhase,
-    ServerMessage, StateId, View,
+    AgentDefinitionId, AgentId, AgentView, ClientMessage, CloseReason, Direction, ErrorCode,
+    IntervalMs, KindId, PROTOCOL_VERSION, Pacing, PacingMode, Placement, ProtocolVersion,
+    RemovalReason, RunId, RunPhase, ServerMessage, StateId, View,
 };
 use agora_server::RETAINED_RESULTS;
 use common::{
-    Client, cell, empty_grid, expect_code, expect_error, expect_spawned, expect_submitted,
+    Client, cell, empty_grid, expect_code, expect_error, expect_spawned, expect_submitted, forager,
     request_id, start_default_server, state, stay, step,
 };
 use serde_json::json;
@@ -165,6 +165,7 @@ async fn r07_a_retry_returns_the_original_result_without_executing_again() {
     let spawn = ClientMessage::Spawn {
         request_id: request_id(2),
         placement: Placement::Random,
+        agent: forager(),
     };
 
     let first = client.exchange(&spawn).await;
@@ -213,6 +214,7 @@ async fn r07_error_results_are_retained_too() {
     let spawn = ClientMessage::Spawn {
         request_id: request_id(2),
         placement: cell(10, 0),
+        agent: forager(),
     };
 
     let first = client.exchange(&spawn).await;
@@ -230,6 +232,7 @@ async fn r07_reusing_an_id_for_a_different_request_conflicts() {
         .exchange(&ClientMessage::Spawn {
             request_id: request_id(2),
             placement: cell(0, 0),
+            agent: forager(),
         })
         .await;
 
@@ -237,6 +240,7 @@ async fn r07_reusing_an_id_for_a_different_request_conflicts() {
         .exchange(&ClientMessage::Spawn {
             request_id: request_id(2),
             placement: cell(1, 1),
+            agent: forager(),
         })
         .await;
 
@@ -252,6 +256,7 @@ async fn r07_a_skipped_id_within_the_retained_results_is_stale() {
         .exchange(&ClientMessage::Spawn {
             request_id: request_id(3),
             placement: Placement::Random,
+            agent: forager(),
         })
         .await;
 
@@ -259,6 +264,7 @@ async fn r07_a_skipped_id_within_the_retained_results_is_stale() {
         .exchange(&ClientMessage::Spawn {
             request_id: request_id(2),
             placement: Placement::Random,
+            agent: forager(),
         })
         .await;
 
@@ -279,6 +285,7 @@ async fn r07_ids_older_than_the_retained_results_have_expired() {
         .map(|_| ClientMessage::Spawn {
             request_id: client.next_id(),
             placement: Placement::Random,
+            agent: forager(),
         })
         .collect();
     for spawn in &spawns {
@@ -832,4 +839,131 @@ async fn r15_run_closed_names_the_reason_and_ends_the_session() {
     expect_code(joiner.spawn(Placement::Random).await, ErrorCode::NoSession);
     // The connection can create a run of its own.
     joiner.create_run().await;
+}
+
+/// The energy of each agent in an `observations` push, by agent.
+fn energies(message: &ServerMessage) -> Vec<(AgentId, Option<f64>)> {
+    let ServerMessage::Observations { observations, .. } = message else {
+        panic!("expected observations, got {message:?}");
+    };
+    observations
+        .iter()
+        .map(|o| (o.agent_id, o.observation.energy.map(|e| e.get())))
+        .collect()
+}
+
+#[tokio::test]
+async fn r08_a_spawn_names_its_agent_definition() {
+    let address = start_default_server().await;
+    let (mut client, _) = Client::with_new_run(address).await;
+    let agent = expect_spawned(client.spawn(Placement::Random).await);
+    client.start().await;
+    let push = client.agent_push().await;
+    assert_eq!(energies(&push), [(agent, Some(1.0))]);
+}
+
+#[tokio::test]
+async fn r09_an_unknown_agent_definition_is_rejected_before_the_phase() {
+    let address = start_default_server().await;
+    let (mut client, _) = Client::with_new_run(address).await;
+    let unknown = |request_id| ClientMessage::Spawn {
+        request_id,
+        placement: Placement::Random,
+        agent: AgentDefinitionId::new("grazer").unwrap(),
+    };
+    let id = client.next_id();
+    let error = expect_code(
+        client.exchange(&unknown(id)).await,
+        ErrorCode::UnknownAgentDefinition,
+    );
+    assert_eq!(error.request_id, Some(id));
+    assert_eq!(error.details.unwrap()["agent"], "grazer");
+    // Nothing was spawned, so the next agent is agent 1.
+    assert_eq!(
+        expect_spawned(client.spawn(Placement::Random).await),
+        agent(1)
+    );
+
+    client.start().await;
+    let id = client.next_id();
+    expect_code(
+        client.exchange(&unknown(id)).await,
+        ErrorCode::UnknownAgentDefinition,
+    );
+}
+
+#[tokio::test]
+async fn r11_observations_carry_the_agents_energy() {
+    let address = start_default_server().await;
+    let (mut client, _) = Client::with_new_run(address).await;
+    let mover = expect_spawned(client.spawn(cell(0, 0)).await);
+    let stayer = expect_spawned(client.spawn(cell(5, 5)).await);
+    client.start().await;
+    client.agent_push().await;
+    client
+        .submit(
+            state(0),
+            vec![step(mover, Direction::North, 1), stay(stayer)],
+        )
+        .await;
+    let push = client.agent_push().await;
+    assert_eq!(
+        energies(&push),
+        [
+            (mover, Some(1.0 - (0.005 + 0.005))),
+            (stayer, Some(1.0 - 0.005))
+        ]
+    );
+}
+
+#[tokio::test]
+async fn r16_agent_removed_follows_submitted_and_precedes_the_observations() {
+    let address = start_default_server().await;
+    let (mut client, _) = Client::with_new_run(address).await;
+    // The mover spends effort every step, so it starves well before the stayer.
+    let mover = expect_spawned(client.spawn(cell(0, 0)).await);
+    let stayer = expect_spawned(client.spawn(cell(5, 5)).await);
+    client.start().await;
+    client.agent_push().await;
+
+    let mut direction = Direction::North;
+    for n in 0.. {
+        assert!(n < 150, "the mover did not starve");
+        let request_id = client.next_id();
+        client
+            .send(&ClientMessage::Submit {
+                request_id,
+                state_id: state(n),
+                actions: vec![step(mover, direction, 1), stay(stayer)],
+            })
+            .await;
+        direction = match direction {
+            Direction::North => Direction::South,
+            _ => Direction::North,
+        };
+        let response = client.receive_raw().await;
+        assert!(
+            matches!(response, ServerMessage::Submitted { .. }),
+            "{response:?}"
+        );
+        match client.receive_raw().await {
+            ServerMessage::Observations { .. } => continue,
+            ServerMessage::AgentRemoved { agent_id, reason } => {
+                assert_eq!(agent_id, mover);
+                assert_eq!(reason, RemovalReason::Starved);
+                let push = client.receive_raw().await;
+                let ServerMessage::Observations { state_id, .. } = &push else {
+                    panic!("expected observations, got {push:?}");
+                };
+                assert_eq!(*state_id, state(n + 1));
+                // The removed agent has no observation; the stayer has lost only decay.
+                let remaining = energies(&push);
+                assert_eq!(remaining.len(), 1);
+                assert_eq!(remaining[0].0, stayer);
+                assert!(remaining[0].1.unwrap() > 0.4);
+                break;
+            }
+            other => panic!("expected a push, got {other:?}"),
+        }
+    }
 }

@@ -12,7 +12,7 @@ packages: [agora-env, agora-sim]
 
 The simulation owns a run's world state, participating agents, action collection and validation, sequential execution, environment effects, and perception generation. It follows the [SADD](../../architecture/sadd.md). Networking, connection authority, elapsed-time deadlines, pacing, and run cleanup belong to the server; rendering belongs to the viewer.
 
-This draft records lifecycle decisions discussed with the maintainer. Implemented behavior is specified in [SPEC-001](specs/lifecycle-and-movement.md), [SPEC-006](specs/kinds-and-appearance.md), and [SPEC-007](specs/environment-definitions.md). Rich capabilities and perception remain future design work beyond the empty-observation MVP.
+This draft records lifecycle decisions discussed with the maintainer. Implemented behavior is specified in [SPEC-001](specs/lifecycle-and-movement.md), [SPEC-006](specs/kinds-and-appearance.md), [SPEC-007](specs/environment-definitions.md), and [SPEC-008](specs/agent-definitions.md). Agents perceive only their energy so far; richer capabilities and perception are built with the second milestone.
 
 ## Package mapping
 
@@ -97,12 +97,12 @@ Execution runs as a fixed sequence of stages, following [ADR-003](../../decision
 | --- | --- | --- |
 | Actions | Agents' actions, one agent at a time in the shuffled order (steps 2 and 3 above). | built: moves |
 | Interactions | Effects of where agents ended up, such as automatic eating. | planned (AGORA-005 chunk 4) |
-| Metabolism | Energy accounting: decay, converting the step's exertion to an energy cost, and starvation at energy 0. | planned (AGORA-005 chunk 4) |
-| Removal | Removal of starved agents and queued removals (step 4). | planned |
+| Metabolism | Energy accounting: decay, converting the step's exertion to an energy cost, and starvation at energy 0. | built |
+| Removal | Removal of starved agents and queued removals (step 4). | built: starved agents |
 | Ecology | Ecology rules, such as respawning food in free cells. | planned (AGORA-005 chunk 4) |
 | Membership | Queued spawns (step 4). | planned |
 | Commit | The state ID goes from N to N+1 (step 5). | built |
-| Perception | Observations for the current state (step 5). Also runs without a step, for example at Start. | built: empty observations |
+| Perception | Observations for the current state (step 5). Also runs without a step, for example at Start. | built: energy |
 
 The order is set in one place in `agora-sim`, and a test checks that it matches this table. Within a stage, systems that touch the same data must declare their order, or the schedule fails to build. A pause runs no stages.
 
@@ -146,7 +146,7 @@ Control loss leaves the body in the environment. The server supplies zero-distan
 
 ## Perception direction beyond the MVP
 
-Agents infer execution success and failure from observations; no separate execution outcome or failure reason is returned. Invalid submissions still produce interface errors. The MVP's empty observations intentionally do not yet allow inference of movement outcomes.
+Agents infer execution success and failure from observations; no separate execution outcome or failure reason is returned. Invalid submissions still produce interface errors. Observations so far carry only energy, so an agent can infer a successful move only from the extra energy it cost.
 
 Future observations combine external senses and internal feelings, exposing only information meaningful from the agent's perspective. Hunger, fatigue, restraint, and impaired vision may be perceived; hidden causes and raw simulation bookkeeping are not automatically exposed. Absolute world coordinates are not supplied by default.
 
@@ -160,7 +160,9 @@ Sense absence differs from an existing sense becoming impaired. Partial impairme
 
 The maintainer agreed this direction for the [second milestone](../../architecture/sadd.md#second-milestone-train-and-watch) on 2026-09-27. [AGORA-005](../../../work/AGORA-005-train-and-watch/context.md) records the reasoning and wire sketches; requirements are specified with each feature.
 
-**Metabolism and food.** An agent's metabolism is an agent property, not part of the environment: energy from 0 to 1, a per-step decay, a rate converting exertion to energy, and a diet mapping food kinds to an efficiency (0 means inedible). Until agents can declare capabilities, every agent gets a built-in default metabolism. Actions record the effort they spend in the agent's exertion, and each action owns its cost: a move adds effort per cell moved, and a failed move adds none. The Metabolism stage then applies decay and the exertion's energy cost, clears the exertion, and checks for starvation, so it does not need to know which actions exist. A later exertion or fatigue sense (M4) can read the same exertion. Food items have a kind, lie in cells without blocking movement, and at most one occupies a cell; their nutrition is set by the environment's ecology, so it can be tuned per training environment. An agent that ends its move on edible food eats it automatically in the Interactions stage, gaining nutrition times efficiency, capped at full; inedible items stay. At energy 0 the agent starves and is removed. The simulation keeps a per-agent record of what it ate for inspection, not perception. Agents without a metabolism ignore food.
+**Metabolism and food.** An agent's metabolism is an agent property, not part of the environment: energy from 0 to 1, a per-step decay, a rate converting exertion to energy, and a diet mapping food kinds to an efficiency (0 means inedible). An agent has a metabolism only if its agent definition gives it one (see below); nothing is defaulted. Actions record the effort they spend in the agent's exertion, whether or not the agent has a metabolism, and each action owns its cost: a move adds effort per cell moved, and a failed move adds none. The Metabolism stage then applies decay and the exertion's energy cost to agents with a metabolism, clears every agent's exertion, and checks for starvation, so it does not need to know which actions exist. A later exertion or fatigue sense (M4) can read the same exertion. Food items have a kind, lie in cells without blocking movement, and at most one occupies a cell; their nutrition is set by the environment's ecology, so it can be tuned per training environment. An agent that ends its move on edible food eats it automatically in the Interactions stage, gaining nutrition times efficiency, capped at full; inedible items stay. At energy 0 the agent starves and is removed, and the step reports the removal so the server can tell its owner. Energy, effort, decay, starvation, and perceiving energy are built ([SPEC-001-R22 to R26](specs/lifecycle-and-movement.md#metabolism)); food, diets, and eating come with AGORA-005 chunk 4.4. The simulation keeps a per-agent record of what it ate for inspection, not perception. Agents without a metabolism ignore food.
+
+**Agent definitions.** Agents have almost nothing by default: an agent has a capability only when it is spawned with it, so clients are explicit about what their agents can do. An agent definition lists the capabilities an agent is spawned with, written as a TOML agent file whose tables are capabilities. Agora bundles a catalog of premade definitions, and a spawn names one; the first is `forager`, with only a metabolism. A capability reference in the spec lists every supported capability and field, and an unknown capability or field is an error naming the supported ones, so definitions are easy to write by hand. This is built ([SPEC-008](specs/agent-definitions.md)). Agreed on 2026-10-12 and not yet built: versioned capability declarations published by the server replace this format, and spawning can then add capabilities to a catalog agent or list them for a bare agent (AGORA-005 chunk 6); the catalog becomes browsable and filterable by capability; and agent definitions can be stored on the server and reused later. Every agent can still move, until moving becomes a declared capability.
 
 **Direction for actions.** Agents will eventually take more than one action per step, such as moving and talking. The intended model is action channels: each channel takes at most one action per step, actions in different channels combine, and actions in the same channel exclude each other. Eating may become an explicit action on its own channel, with automatic eating kept as an option for training. Neither is designed in detail yet; a submission remains a single move.
 
@@ -186,9 +188,10 @@ External live edits are required eventually, but their admission and scheduling 
 
 ## Detailed specifications
 
-- [SPEC-001 — Simulation lifecycle and movement](specs/lifecycle-and-movement.md) (draft): grid creation with terrain, setup spawning, Start, submission, readiness, advancement with MVP moves, viewer state, and reflection of components.
+- [SPEC-001 — Simulation lifecycle and movement](specs/lifecycle-and-movement.md) (draft): grid creation with terrain, setup spawning, Start, submission, readiness, advancement with MVP moves, metabolism and starvation, viewer state, and reflection of components.
 - [SPEC-006 — Kinds and appearance](specs/kinds-and-appearance.md) (draft): the kind registry and the built-in kinds.
 - [SPEC-007 — Environment definitions](specs/environment-definitions.md) (draft): layouts, environments, the TOML layout and environment files, and the bundled definitions.
+- [SPEC-008 — Agent definitions](specs/agent-definitions.md) (draft): agent definitions and their capabilities, the TOML agent files, the capability reference, and the bundled agents.
 
 Specs should link canonical [shared contracts](../../contracts/README.md) rather than duplicate them. No message contracts have been written yet.
 

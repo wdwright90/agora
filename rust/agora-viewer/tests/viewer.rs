@@ -9,7 +9,7 @@ use agora_client::protocol::{
     StateId,
 };
 use agora_client::{Client, Session};
-use agora_server::{ServerConfig, serve};
+use agora_server::{FORAGER, ServerConfig, serve};
 use agora_viewer::ViewerCorePlugin;
 use agora_viewer::network::{self, Command, Network, NetworkEvent, Target};
 use agora_viewer::render::{AgentEntities, AgentMarker, Motion, cell_center};
@@ -139,6 +139,10 @@ fn agent_entities(app: &mut App) -> Vec<(AgentMarker, Motion)> {
     agents
 }
 
+fn forager() -> agora_client::protocol::AgentDefinitionId {
+    agora_client::protocol::AgentDefinitionId::new(FORAGER).unwrap()
+}
+
 fn east(agent: agora_client::protocol::AgentId) -> ActionEntry {
     ActionEntry {
         agent_id: agent,
@@ -199,7 +203,7 @@ async fn r02_commands_reach_the_run_and_failures_are_reported() {
     let (mut app, run_id) = headless(&url, Target::Create).await;
     let mut joiner = watching(&url, Target::Join(run_id.clone())).await.network;
     let player = join(&url, &run_id).await;
-    player.spawn(Placement::Random).await.unwrap();
+    player.spawn(Placement::Random, forager()).await.unwrap();
 
     joiner.commands.send(Command::Start).unwrap();
     match next_event(&mut joiner).await {
@@ -224,8 +228,14 @@ async fn r03_r04_agent_entities_follow_the_views() {
     let (mut app, run_id) = headless(&url, Target::Create).await;
     let stayer = join(&url, &run_id).await;
     let leaver = join(&url, &run_id).await;
-    let staying = stayer.spawn(Placement::Cell { x: 2, y: 3 }).await.unwrap();
-    let leaving = leaver.spawn(Placement::Cell { x: 7, y: 7 }).await.unwrap();
+    let staying = stayer
+        .spawn(Placement::Cell { x: 2, y: 3 }, forager())
+        .await
+        .unwrap();
+    let leaving = leaver
+        .spawn(Placement::Cell { x: 7, y: 7 }, forager())
+        .await
+        .unwrap();
 
     // One entity per agent, placed at its cell.
     update_until(&mut app, |app| agent_entities(app).len() == 2).await;

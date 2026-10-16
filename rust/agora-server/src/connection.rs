@@ -327,17 +327,30 @@ impl SessionLink {
                     "this connection already has a session",
                 ));
             }
-            ClientMessage::Spawn { placement, .. } => self
-                .run
-                .spawn(self.id.clone(), to_sim_placement(*placement))
-                .await
-                .map(|result| match result {
-                    Ok(agent) => ServerMessage::Spawned {
-                        request_id: id,
-                        agent_id: AgentId::new(agent.0).expect("agent IDs stay below 2^53"),
-                    },
-                    Err(e) => ServerMessage::Error(spawn_error(id, e)),
-                }),
+            ClientMessage::Spawn {
+                placement, agent, ..
+            } => {
+                let Some(definition) = catalog::agent(agent) else {
+                    return ServerMessage::Error(wire::with_details(
+                        wire::error(
+                            Some(id),
+                            ErrorCode::UnknownAgentDefinition,
+                            format!("no agent definition {:?}", agent.as_str()),
+                        ),
+                        json!({ "agent": agent }),
+                    ));
+                };
+                self.run
+                    .spawn(self.id.clone(), to_sim_placement(*placement), definition)
+                    .await
+                    .map(|result| match result {
+                        Ok(agent) => ServerMessage::Spawned {
+                            request_id: id,
+                            agent_id: AgentId::new(agent.0).expect("agent IDs stay below 2^53"),
+                        },
+                        Err(e) => ServerMessage::Error(spawn_error(id, e)),
+                    })
+            }
             ClientMessage::Start { .. } => {
                 self.run
                     .start(self.id.clone())

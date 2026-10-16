@@ -6,11 +6,12 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use agora_client::protocol::{
-    Action, ActionEntry, AgentId, CatalogEntryId, CloseReason, Direction, ErrorCode, ErrorResponse,
-    PROTOCOL_VERSION, PacingMode, Placement, RunId, RunPhase, ServerMessage, SessionId, StateId,
+    Action, ActionEntry, AgentDefinitionId, AgentId, CatalogEntryId, CloseReason, Direction,
+    ErrorCode, ErrorResponse, PROTOCOL_VERSION, PacingMode, Placement, RemovalReason, RunId,
+    RunPhase, ServerMessage, SessionId, StateId,
 };
-use agora_client::{Client, ClientError, Observations, Session};
-use agora_server::{EMPTY_GRID_10X10, ServerConfig, serve};
+use agora_client::{AgentEvent, AgentEvents, Client, ClientError, Session};
+use agora_server::{EMPTY_GRID_10X10, FORAGER, ServerConfig, serve};
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::Message;
@@ -23,6 +24,10 @@ async fn start_server() -> String {
     let address = listener.local_addr().unwrap();
     tokio::spawn(serve(listener, ServerConfig::default()));
     format!("ws://{address}")
+}
+
+fn forager() -> AgentDefinitionId {
+    AgentDefinitionId::new(FORAGER).unwrap()
 }
 
 fn empty_grid() -> CatalogEntryId {
@@ -43,7 +48,7 @@ fn stay(agent: AgentId) -> ActionEntry {
     }
 }
 
-async fn new_run(url: &str) -> (Session, Observations) {
+async fn new_run(url: &str) -> (Session, AgentEvents) {
     Client::connect(url)
         .await
         .unwrap()
@@ -62,11 +67,18 @@ async fn join(url: &str, run_id: &RunId) -> Session {
     session
 }
 
-async fn next_observations(observations: &mut Observations) -> agora_client::ObservationBatch {
-    tokio::time::timeout(TIMEOUT, observations.next())
+async fn next_event(events: &mut AgentEvents) -> AgentEvent {
+    tokio::time::timeout(TIMEOUT, events.next())
         .await
-        .expect("timed out waiting for observations")
-        .expect("the observation stream ended")
+        .expect("timed out waiting for an agent event")
+        .expect("the agent event stream ended")
+}
+
+async fn next_observations(events: &mut AgentEvents) -> agora_client::ObservationBatch {
+    match next_event(events).await {
+        AgentEvent::Observations(batch) => batch,
+        other => panic!("expected observations, got {other:?}"),
+    }
 }
 
 /// A fake server on an unused port that answers `hello` with `welcome_reply`. If
@@ -145,7 +157,7 @@ async fn r03_concurrent_requests_reach_the_server_in_number_order() {
     let tasks: Vec<_> = (0..20)
         .map(|_| {
             let session = session.clone();
-            tokio::spawn(async move { session.spawn(Placement::Random).await })
+            tokio::spawn(async move { session.spawn(Placement::Random, forager()).await })
         })
         .collect();
 
@@ -162,9 +174,12 @@ async fn r04_requests_return_results_and_rejections() {
     let error = session.start().await.err().unwrap();
     assert_eq!(error.code(), Some(&ErrorCode::StartNotEligible));
 
-    let agent = session.spawn(Placement::Cell { x: 3, y: 3 }).await.unwrap();
+    let agent = session
+        .spawn(Placement::Cell { x: 3, y: 3 }, forager())
+        .await
+        .unwrap();
     let error = session
-        .spawn(Placement::Cell { x: 3, y: 3 })
+        .spawn(Placement::Cell { x: 3, y: 3 }, forager())
         .await
         .err()
         .unwrap();
@@ -180,7 +195,7 @@ async fn r04_requests_return_results_and_rejections() {
 async fn r05_observations_arrive_in_order() {
     let url = start_server().await;
     let (session, mut observations) = new_run(&url).await;
-    let agent = session.spawn(Placement::Random).await.unwrap();
+    let agent = session.spawn(Placement::Random, forager()).await.unwrap();
     session.start().await.unwrap();
 
     // One task handles steps while the session is shared with another.
@@ -210,8 +225,8 @@ async fn r06_view_and_pacing_handles_hold_the_newest_state() {
     assert_eq!(view.borrow_and_update().as_ref().unwrap().agents.len(), 0);
     assert!(!pacing.borrow().unwrap().you_control);
 
-    player.spawn(Placement::Random).await.unwrap();
-    player.spawn(Placement::Random).await.unwrap();
+    player.spawn(Placement::Random, forager()).await.unwrap();
+    player.spawn(Placement::Random, forager()).await.unwrap();
     tokio::time::timeout(TIMEOUT, async {
         while view.borrow_and_update().as_ref().unwrap().agents.len() < 2 {
             view.changed().await.unwrap();
@@ -287,7 +302,11 @@ async fn r07_connection_loss_fails_requests_and_ends_observations() {
     let (session, mut observations) = new_run(&url).await;
 
     // The fake server closes the connection instead of answering.
-    let error = session.spawn(Placement::Random).await.err().unwrap();
+    let error = session
+        .spawn(Placement::Random, forager())
+        .await
+        .err()
+        .unwrap();
     assert!(matches!(error, ClientError::Closed), "{error:?}");
 
     let batch = tokio::time::timeout(TIMEOUT, observations.next())
@@ -306,10 +325,14 @@ async fn r09_leaving_ends_the_session_and_its_stream() {
 
     other.leave().await.unwrap();
 
-    let error = other.spawn(Placement::Random).await.err().unwrap();
+    let error = other
+        .spawn(Placement::Random, forager())
+        .await
+        .err()
+        .unwrap();
     assert!(matches!(error, ClientError::Closed), "{error:?}");
     // The run is unaffected for the session that stayed.
-    session.spawn(Placement::Random).await.unwrap();
+    session.spawn(Placement::Random, forager()).await.unwrap();
     session.leave().await.unwrap();
     let ended = tokio::time::timeout(TIMEOUT, observations.next())
         .await
@@ -337,9 +360,68 @@ async fn r10_a_closed_run_reports_its_reason() {
         .expect("timed out waiting for the stream to end");
     assert_eq!(ended, None);
     assert_eq!(joiner.closed_reason(), Some(CloseReason::ClosedByCreator));
-    let error = joiner.spawn(Placement::Random).await.err().unwrap();
+    let error = joiner
+        .spawn(Placement::Random, forager())
+        .await
+        .err()
+        .unwrap();
     assert!(
         matches!(error, ClientError::RunClosed(CloseReason::ClosedByCreator)),
         "{error:?}"
     );
+}
+
+#[tokio::test]
+async fn r12_a_removal_arrives_before_the_observations_that_leave_the_agent_out() {
+    let url = start_server().await;
+    let (session, mut events) = new_run(&url).await;
+    // The mover spends effort every step, so it starves well before the stayer.
+    let mover = session
+        .spawn(Placement::Cell { x: 0, y: 0 }, forager())
+        .await
+        .unwrap();
+    let stayer = session
+        .spawn(Placement::Cell { x: 5, y: 5 }, forager())
+        .await
+        .unwrap();
+    session.start().await.unwrap();
+    let start = next_observations(&mut events).await;
+    let energies: Vec<_> = start
+        .observations
+        .iter()
+        .map(|o| o.observation.energy.map(|e| e.get()))
+        .collect();
+    assert_eq!(energies, [Some(1.0), Some(1.0)]);
+
+    let mut direction = Direction::North;
+    for n in 0..150 {
+        let actions = vec![
+            ActionEntry {
+                agent_id: mover,
+                action: Action::Move {
+                    direction,
+                    distance: 1,
+                },
+            },
+            stay(stayer),
+        ];
+        session.submit(state(n), actions).await.unwrap();
+        direction = match direction {
+            Direction::North => Direction::South,
+            _ => Direction::North,
+        };
+        match next_event(&mut events).await {
+            AgentEvent::Observations(_) => continue,
+            AgentEvent::Removed { agent_id, reason } => {
+                assert_eq!(agent_id, mover);
+                assert_eq!(reason, RemovalReason::Starved);
+                let batch = next_observations(&mut events).await;
+                assert_eq!(batch.state_id, state(n + 1));
+                let agents: Vec<_> = batch.observations.iter().map(|o| o.agent_id).collect();
+                assert_eq!(agents, [stayer]);
+                return;
+            }
+        }
+    }
+    panic!("the mover did not starve");
 }

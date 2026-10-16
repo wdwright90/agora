@@ -12,19 +12,20 @@ packages: [agora-protocol, agora-server, agora-client, agora-viewer]
 
 This contract is the canonical definition of the messages exchanged between the Agora server and its clients: the Rust client, the viewer, and later the Python client. It implements the SADD's [communication](../architecture/sadd.md#simulation-step-coordination), [error-response](../architecture/sadd.md#error-responses), and [run lifecycle](../architecture/sadd.md#run-lifecycle) rules.
 
-The contract grows feature by feature. Protocol version 0.7.0 currently covers:
+The contract grows feature by feature. Protocol version 0.8.0 currently covers:
 
 - message framing
 - the version handshake
 - request correlation
 - errors
 - run setup: create, join, spawn, and Start
-- action submission and agent observations
+- action submission and agent observations, including energy
+- agents removed by the simulation
 - watching a run's view, with the run's kinds and terrain
 - pacing controls
 - leaving and closing runs
 
-Session recovery and credentials are not yet defined. They are added as the features that use them are built. Version 0.2.0 added submission and observations, 0.3.0 added watching, 0.4.0 added pacing, 0.5.0 added leaving and closing runs, 0.6.0 added kinds to `watching` and to agents in views, and 0.7.0 added terrain to `watching` and the `cell_blocked` error.
+Session recovery and credentials are not yet defined. They are added as the features that use them are built. Version 0.2.0 added submission and observations, 0.3.0 added watching, 0.4.0 added pacing, 0.5.0 added leaving and closing runs, 0.6.0 added kinds to `watching` and to agents in views, 0.7.0 added terrain to `watching` and the `cell_blocked` error, and 0.8.0 added the agent definition to `spawn`, energy to observations, and the `agent_removed` push.
 
 ## Terminology and preconditions
 
@@ -46,7 +47,7 @@ Session recovery and credentials are not yet defined. They are added as the feat
   | --- | --- | --- |
   | `request_id`, `agent_id` | integer | 1 to 2⁵³ − 1 |
   | `state_id` | integer | 0 to 2⁵³ − 1 |
-  | `run_id`, `session_id`, `catalog_entry`, `kind` | string | non-empty; opaque to clients, compared exactly |
+  | `run_id`, `session_id`, `catalog_entry`, `agent`, `kind` | string | non-empty; opaque to clients, compared exactly |
   | cell coordinates `x`, `y` | integer | 0 to 2³² − 1 |
 
   The upper bound of 2⁵³ − 1 keeps integers exact in every JSON implementation. Values outside the allowed ranges are malformed.
@@ -87,9 +88,10 @@ Session recovery and credentials are not yet defined. They are added as the feat
   | --- | --- | --- |
   | `create_run {request_id, catalog_entry}` | `run_created {request_id, run_id, session_id, catalog_entry, state_id, phase}` | Creates a run in `setup` at state 0 and establishes this connection's session with creator authority. |
   | `join_run {request_id, run_id}` | `run_joined {request_id, run_id, session_id, catalog_entry, state_id, phase}` | Establishes a new non-creator session in an existing run. `phase` is `setup` or `started`. |
-  | `spawn {request_id, placement}` | `spawned {request_id, agent_id}` | Sent once the agent has been placed. The session owns the agent. Coordinates are not returned. |
+  | `spawn {request_id, placement, agent}` | `spawned {request_id, agent_id}` | Sent once the agent has been placed. `agent` names an agent catalog entry ([SPEC-003-R01](../components/server/specs/sessions-and-runs.md#catalog-and-identifiers)), whose capabilities the agent has. The session owns the agent. Coordinates are not returned. |
   | `start {request_id}` | `started {request_id}` | Confirms that the run has started. Initial observations for state 0 follow as a push ([R11](#steps-and-observations)). |
 
+  - An unknown `agent` returns `unknown_agent_definition`, whatever the run's phase.
   - `placement` is either `{"kind": "random"}`, meaning uniformly among unoccupied cells whose terrain does not block movement, or `{"kind": "cell", "x", "y"}`. On the wire, `(0, 0)` is the grid's south-west corner, `x` grows east, and `y` grows north.
   - A `create_run` or `join_run` on a connection that already has a session returns `session_already_established`.
   - A run-scoped request before a session exists, or after it has ended, returns `no_session`.
@@ -100,10 +102,14 @@ Session recovery and credentials are not yet defined. They are added as the feat
   - The whole request fails with `run_not_started` before Start, and with `wrong_state` when `state_id` is not the run's current state.
   - Otherwise the response is `submitted {request_id, state_id, results}`, with one result per entry in the order submitted. A result is `{agent_id}` when the action was accepted, or `{agent_id, error: {code, message, details?}}` when it was rejected. Entry errors have the same fields as error responses, without `request_id`.
   - Entries are checked in order. An entry is rejected with `agent_not_owned` when the session does not own the agent, `already_submitted` when the agent already has an accepted action for this state, and `agent_limit.distance_budget_exceeded` when the distance is over the movement budget of 1. A rejected entry leaves the agent free to submit again. An accepted action is fixed; a later entry for the same agent, in the same request or another, is rejected.
-- **SPEC-002-R11:** `observations {state_id, observations}` is a push. It carries one `{agent_id, observation}` entry for each agent the session owns, in ascending agent ID order, all labeled with `state_id`. In this version `observation` is an empty object.
+- **SPEC-002-R11:** `observations {state_id, observations}` is a push. It carries one `{agent_id, observation}` entry for each agent the session owns, in ascending agent ID order, all labeled with `state_id`. An `observation` is an object holding one field per sense the agent has, and a sense the agent lacks is left out:
+  - `energy`: a number from 0 to 1 inclusive, at full precision, for an agent with a metabolism. Other values are malformed.
+
+  An agent with no senses has an empty object.
   - The server pushes observations for state 0 after Start, and for state N + 1 after each step, to every connected session that owns agents.
   - A push caused by a request is sent after that request's response. `started` precedes the state-0 observations, and the `submitted` that completes a step precedes that step's observations.
   - Clients use the observations' `state_id` as the next submission's target.
+- **SPEC-002-R16:** `agent_removed {agent_id, reason}` is a push telling a session that the simulation removed one of its agents during a step. `reason` is `starved` when the agent's energy reached 0; receivers treat an unknown reason as a generic removal. The server sends one for each removed agent, after the response that completed the step and before that step's `observations`, which leave the agent out. A session whose last agent was removed receives no `observations`. The agent no longer exists: an entry for it is rejected with `agent_not_owned`.
 
 ### Viewing
 
@@ -164,6 +170,7 @@ Session recovery and credentials are not yet defined. They are added as the feat
   | `request_id_conflict` | ID reused with different contents | — |
   | `result_expired` | Retry after the stored result expired | — |
   | `unknown_catalog_entry` | No such catalog entry | `catalog_entry` |
+  | `unknown_agent_definition` | No such agent catalog entry | `agent` |
   | `unknown_run` | No such run | `run_id` |
   | `not_creator` | Operation requires creator authority | — |
   | `run_already_started` | Operation only available during setup | — |
@@ -210,16 +217,19 @@ Rust tests are named by requirement ID. Message types are tested in `rust/agora-
 | R09 | Known codes map to their wire names, including the `agent_limit.` prefix, and unknown codes are preserved | `r09_*` |
 | R10 | An accepted entry has no `error` field | `r10_*` |
 | R12 | View, kind, and terrain fixtures round-trip; negative coordinates, a missing phase, a missing or empty agent kind, `watching` without kinds or terrain, invalid kinds (unknown category, class, or shape, hue or size outside 0 to 1, a missing flag or appearance, an empty ID), and invalid terrain (wrong length, a negative or out-of-range index, an index that is not terrain) are rejected; the terrain fixtures fail the terrain check; hue and size accept 0 and 1 | `valid/`, `invalid/server/view_*`, `invalid/server/kind_*`, `invalid/server/watching_*`, `r12_*` |
+| R11 | Observation fixtures round-trip with and without energy; energy accepts 0 and 1, an absent sense is left out, and energy outside 0 to 1 or not a number is rejected | `valid/server/observations.json`, `invalid/server/observations_energy_*`, `r11_*` |
+| R16 | The `agent_removed` fixture round-trips; a missing reason and agent ID 0 are rejected; an unknown reason is read as a generic removal, and the push has no request ID | `valid/server/agent_removed.json`, `invalid/server/agent_removed_*`, `r16_*` |
 | R14, R15 | Leave and close fixtures round-trip; `run_closed` without a reason is rejected; an unknown reason is read as a generic closure | `valid/`, `invalid/server/run_closed_missing_reason.json`, `r15_*` |
 | R13 | Pacing fixtures round-trip; intervals of 0 and over an hour, unknown modes, and `watching` without pacing are rejected | `valid/`, `invalid/client/set_pacing_*`, `invalid/server/watching_missing_pacing.json` |
 | R01 (server) | Unknown types report their type; invalid JSON, non-objects, missing fields, and binary frames are malformed, echoing any readable request ID | server `r01_*` |
 | R02 (server) | A request with an extra field succeeds | server `r02_*` |
 | R04, R06 (server) | `hello` gets `welcome`; an unsupported version is rejected and the connection closed; requests before `hello` and a second `hello` are rejected | server `r04_*` |
 | R07 (server) | Retries replay results, including errors, without re-executing; conflicts, skipped IDs, and IDs older than the retained results are rejected; sessions number requests independently | server `r07_*` |
-| R08 (server) | Create, join, spawn, and Start succeed with the documented fields; a second session and requests without a session are rejected | server `r08_*` |
-| R09 (server) | Catalog, run, and spawn failures, including a spawn on a wall, return their codes and details | server `r09_*` |
+| R08 (server) | Create, join, spawn, and Start succeed with the documented fields; a forager's state-0 observation has energy 1; a second session and requests without a session are rejected | server `r08_*` |
+| R09 (server) | Catalog, run, and spawn failures, including a spawn on a wall and an unknown agent definition before and after Start, return their codes and details | server `r09_*` |
 | R10 (server) | Entry results are in order with their codes and details; submitting before Start or for another state is rejected, and a rejected submission leaves the slot open | server `r10_*` |
-| R11 (server) | `started` precedes the state-0 observations; the step-completing `submitted` precedes the state-1 observations | server `r11_*` |
+| R11 (server) | `started` precedes the state-0 observations; the step-completing `submitted` precedes the state-1 observations; observations carry each agent's energy after its effort and decay | server `r11_*` |
+| R16 (server) | A starving agent's `agent_removed` follows the step-completing `submitted` and precedes the observations, which leave it out | server `r16_*` |
 | R12 (server) | `watching` carries the current view, the built-in kinds, and each catalog entry's terrain; a viewer receives a view after a spawn, Start, and a step, with the moved position and the agent's kind | server `r12_*` |
 | R13 (server) | `watching` carries the default pacing state; each pacing request gets its response and the changes are pushed; each error code is returned | server `r13_*` |
 | R14 (server) | `left` ends the session, later requests and a retried leave return `no_session`, and the connection can join again; a non-creator's close returns `not_creator`, and the creator's returns `closed` and ends its session | server `r14_*` |

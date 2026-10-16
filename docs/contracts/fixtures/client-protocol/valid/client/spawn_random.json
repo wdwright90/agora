@@ -1,1 +1,1 @@
-{ "type": "spawn", "request_id": 3, "placement": { "kind": "random" } }
+{ "type": "spawn", "request_id": 3, "placement": { "kind": "random" }, "agent": "forager" }
